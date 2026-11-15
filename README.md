@@ -106,14 +106,28 @@ each worker. `--chunks N` turns one frame range into N separate render jobs.
 GPU rendering has **not** been measured. `render.device: AUTO` is implemented but untested on real
 hardware. Lower `samples`, `fps`, `duration` or the output size to cut render time.
 
-## Kaggle (not tested yet)
+## Kaggle GPU benchmark (kit written; NOT yet run on Kaggle)
 
-1. Check `python --version` in the notebook. If it is 3.11, `pip install bpy==4.5.16 numpy<2`.
-   Otherwise download the Blender 4.5 LTS Linux build (needs notebook internet access) and use `--blender`.
-2. `apt-get install -y ffmpeg` if FFmpeg is missing.
-3. Run the commands above with `--use-bpy` or `--blender`. Set `"device": "AUTO"` so Cycles picks the GPU.
-4. Credentials: never commit them. If you later automate Kaggle from GitHub Actions, store the token
-   as a GitHub Secret (e.g. `KAGGLE_API_TOKEN`) and read it from the environment. V1 does not need it.
+Goal: find out how many seconds one 16384-face frame takes on a Kaggle GPU, because that decides
+whether one Kaggle session is enough or the work must be split across workers.
+
+In a new Kaggle notebook: turn **Internet on** and pick a **GPU accelerator** (Settings panel), then:
+
+```python
+!git clone https://github.com/damarlanandu2005-jpg/3d-simulation-shorts-engine
+%cd 3d-simulation-shorts-engine
+!bash kaggle/setup_kaggle.sh          # installs ffmpeg + bpy 4.5; last line prints ENGINE_PYTHON=...
+!python kaggle/gpu_benchmark.py       # add --python <ENGINE_PYTHON> if setup created a venv
+```
+
+It prints the GPU, the Cycles devices, bake time, GPU seconds/frame (after a warm-up frame), CPU
+seconds/frame for comparison, and writes `output/gpu_bench/benchmark_result.json`. Send that file back.
+Use `--faces 1024` for a quick sanity run first. If the output says Cycles fell back to CPU, the
+device list shows why (empty `CUDA`/`OPTIX` lists mean no usable GPU backend was found).
+
+Run locally the script was only tested on a CPU-only machine (it correctly reports "no GPU").
+`setup_kaggle.sh` and everything GPU-related are untested. Never commit credentials; if you later
+automate Kaggle from GitHub Actions, keep the token in a GitHub Secret (e.g. `KAGGLE_API_TOKEN`).
 
 ## GitHub Actions
 
@@ -142,6 +156,7 @@ shorts_engine/
   render.py          plans and runs bake -> render -> ffmpeg, writes benchmark.json
   assemble.py        FFmpeg command builders (no bpy)
 configs/             example_cloth.json, ci_smoke.json
+kaggle/              setup_kaggle.sh, gpu_benchmark.py
 tests/
 ```
 

@@ -99,6 +99,12 @@ jobs:
           kaggle kernels output "$KERNEL" -p kaggle_out -o || echo "::warning::could not download kernel output"
           find kaggle_out -type f | head -50
 
+      - name: Show kernel run_info (errors and tails are printed here)
+        if: always() && steps.prep.outputs.kernel != ''
+        run: |
+          f=$(find kaggle_out -name run_info.json | head -1)
+          [ -n "$f" ] && cat "$f" || echo "no run_info.json downloaded (kernel died before writing it)"
+
       - name: Verify mp4, benchmark.json and run_info.json
         run: |
           # kernel writes /kaggle/working/result/*; the CLI may keep that subfolder

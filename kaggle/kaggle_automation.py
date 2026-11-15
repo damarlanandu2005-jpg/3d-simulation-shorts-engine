@@ -123,7 +123,7 @@ try:
     print(setup.stdout[-4000:], flush=True)
     print(setup.stderr[-2000:], file=sys.stderr, flush=True)
     if setup.returncode != 0:
-        fail(f"kaggle/setup_kaggle.sh exited {setup.returncode}")
+        fail(f"kaggle/setup_kaggle.sh exited {setup.returncode}. stdout tail:\n{setup.stdout[-1500:]}\nstderr tail:\n{setup.stderr[-1500:]}")
     m = re.findall(r"^ENGINE_PYTHON=(.+)$", setup.stdout, flags=re.M)
     if not m:
         fail("setup_kaggle.sh did not print ENGINE_PYTHON=")
@@ -141,11 +141,19 @@ try:
     info["status"] = "rendering"
     save_info()
     t0 = time.time()
-    r = subprocess.run([py, "-m", "shorts_engine.render", "--config", CONFIG, "--use-bpy"],
-                       cwd=repo)
+    tail = []
+    with open(RESULT / "render.log", "w") as logf:
+        proc = subprocess.Popen([py, "-m", "shorts_engine.render", "--config", CONFIG, "--use-bpy"],
+                                cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            logf.write(line)
+            tail.append(line)
+            tail = tail[-60:]
+        proc.wait()
     info["wall_seconds"] = round(time.time() - t0, 1)
-    if r.returncode != 0:
-        fail(f"render exited {r.returncode}")
+    if proc.returncode != 0:
+        fail(f"render exited {proc.returncode}. Last output:\n" + "".join(tail)[-2500:])
 
     # 6. Collect outputs and require them.
     out_dir = repo / "output" / OUT_NAME

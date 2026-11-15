@@ -27,19 +27,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import (
-    SUPPORTED_OBJECTS,
     CameraCfg,
     Config,
     ConfigError,
+    ExperimentConfig,
     PhysicsCfg,
-    faces_to_segments,
     load_config,
 )
+from .templates import TEMPLATES, ExperimentTemplate, get_template
 
 SCHEMA_VERSION = 2
 # Roadmap names that are NOT implemented: used only to give a clearer error, never listed as supported.
-PLANNED_EXPERIMENTS = ("cloth_drop", "multiple_balls", "ball_drop", "ball_funnel", "rings", "paper_drape",
-                       "paper_collision", "softbody_collision", "rope_collision", "particle_flow")
+PLANNED_EXPERIMENTS = ("cloth_drop", "ball_drop", "paper_drape", "paper_collision", "softbody_collision",
+                       "rope_collision", "particle_flow", "pendulum", "domino_chain")
+
+# the registry of everything this engine can generate (see templates.py)
+EXPERIMENT_TYPES: dict[str, ExperimentTemplate] = TEMPLATES
+ExperimentType = ExperimentTemplate
+EXPERIMENT_FOR_SIMULATION = {"cloth": "cloth_drape"}      # legacy flat configs are always the V1 cloth drape
 
 
 def _number(value: Any, path: str, *, positive: bool = False) -> float:
@@ -50,60 +55,14 @@ def _number(value: Any, path: str, *, positive: bool = False) -> float:
     return value
 
 
-@dataclass(frozen=True)
-class ParamSpec:
-    """One experiment-level parameter and where it lands in ``Config``."""
-    config_path: tuple[str, str]           # (section, field) in Config, e.g. ("object", "cloth_size")
-    check: Callable[[Any, str], Any]
-    description: str = ""
-
-
-@dataclass(frozen=True)
-class ExperimentType:
-    name: str
-    description: str
-    simulation: str                          # Config.simulation / key into simulation.SIMULATORS
-    objects: tuple[str, ...]                 # allowed values of experiment.object
-    params: dict = field(default_factory=dict)         # experiment.params: name -> ParamSpec
-    stage_params: dict = field(default_factory=dict)   # stages[].params: name -> validator(value, path)
-    stage_meaning: str = ""
-
-
-def _check_faces(value: Any, path: str) -> int:
-    try:
-        faces_to_segments(value)
-    except ConfigError as exc:
-        raise ConfigError(f"{path}: {exc}") from exc
-    return value
-
-
-EXPERIMENT_TYPES: dict[str, ExperimentType] = {
-    "cloth_drape": ExperimentType(
-        name="cloth_drape",
-        description="A cloth sheet is dropped onto an object; stages repeat it at different mesh resolutions.",
-        simulation="cloth",
-        objects=SUPPORTED_OBJECTS,
-        params={
-            "cloth_size": ParamSpec(("object", "cloth_size"), lambda v, p: _number(v, p, positive=True),
-                                    "side length of the square cloth sheet (metres)"),
-            "drop_height": ParamSpec(("object", "cloth_drop_height"), lambda v, p: _number(v, p, positive=True),
-                                     "height of the sheet above the top of the object (metres)"),
-        },
-        stage_params={"faces": _check_faces},
-        stage_meaning="mesh resolution: number of cloth faces (a perfect square, e.g. 64, 1024, 4096, 16384)",
-    ),
-}
-
-EXPERIMENT_FOR_SIMULATION = {t.simulation: t.name for t in EXPERIMENT_TYPES.values()}
-
 _TOP_KEYS = {"schema_version", "name", "seed", "experiment", "simulation", "stages", "camera", "material",
              "render", "output", "label", "hook", "video", "audio"}
 _EXPERIMENT_KEYS = {"type", "object", "params"}
 _SIMULATION_KEYS = {"fps", "duration", "physics"}
 _STAGE_KEYS = {"params", "camera"}
-_HOOK_KEYS = {"seconds", "mode", "text", "text_size", "text_y", "closeup"}
+_HOOK_KEYS = {"seconds", "mode", "text", "text_size", "text_y", "closeup", "window"}
 _VIDEO_KEYS = {"crf", "cards"}
-_CAMERA_KEYS = {"distance", "height", "target_z", "focal_length"}
+_CAMERA_KEYS = {"distance", "height", "target_z", "focal_length", "preset", "motion"}
 _CAMERA_OVERRIDE_KEYS = ("distance", "height", "target_z", "focal_length")
 _PASSTHROUGH = ("material", "render", "output", "label", "audio")
 
@@ -120,18 +79,16 @@ def _only(data: dict, allowed: set, path: str) -> None:
         raise ConfigError(f"unknown key(s) in '{path}': {sorted(bad)}; allowed: {sorted(allowed)}")
 
 
-def get_experiment_type(name: Any) -> ExperimentType:
-    if not isinstance(name, str) or not name:
-        raise ConfigError(f"experiment.type must be a non-empty string, got {name!r}")
-    if name in EXPERIMENT_TYPES:
-        return EXPERIMENT_TYPES[name]
-    hint = " (it is on the roadmap but not implemented yet)" if name in PLANNED_EXPERIMENTS else ""
-    raise ConfigError(f"experiment type {name!r} is not available{hint}; supported: {sorted(EXPERIMENT_TYPES)}")
+get_experiment_type = get_template
 
 
 # ------------------------------------------------------------------ new format -> flat Config dict
 def experiment_to_legacy(data: dict) -> dict:
-    """Validate the experiment-format dict and translate it to the flat dict ``Config`` is built from."""
+    """Validate the experiment-format dict and translate it to the flat dict a ``Config`` is built from.
+
+    ``cloth_drape`` translates to the V1 flat format (so it stays byte-identical to the V1.1 reference). Every other
+    experiment produces a dict with an ``experiment`` key, which ``from_dict`` builds as an ``ExperimentConfig``.
+    """
     data = _obj(data, "<config>")
     _only(data, _TOP_KEYS, "<config>")
     if data.get("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
@@ -140,22 +97,29 @@ def experiment_to_legacy(data: dict) -> dict:
         if required not in data:
             raise ConfigError(f"'{required}' is required in the experiment format")
 
-    # experiment
     exp = _obj(data["experiment"], "experiment")
     _only(exp, _EXPERIMENT_KEYS, "experiment")
-    etype = get_experiment_type(exp.get("type"))
-    obj = exp.get("object", "sphere")
-    if obj not in etype.objects:
-        raise ConfigError(f"experiment.object {obj!r} is not valid for {etype.name}; allowed: {list(etype.objects)}")
-    params = _obj(exp.get("params", {}), "experiment.params")
-    _only(params, set(etype.params), "experiment.params")
-    out: dict = {"simulation": etype.simulation, "object": {"type": obj}}
-    for pname, value in params.items():
-        spec = etype.params[pname]
-        section, key = spec.config_path
-        out.setdefault(section, {})[key] = spec.check(value, f"experiment.params.{pname}")
+    t = get_template(exp.get("type"))
+    generic = t.name != "cloth_drape"
+    obj = exp.get("object", t.default_object)
+    if obj not in t.objects:
+        raise ConfigError(f"experiment.object {obj!r} is not valid for {t.name}; allowed: {list(t.objects)}")
+    given = _obj(exp.get("params", {}), "experiment.params")
+    _only(given, set(t.params), "experiment.params")
+    resolved = t.resolve_params(given)
+    out: dict = {"simulation": t.simulation}
 
-    # simulation
+    if generic:
+        out.update(experiment=t.name, shape=obj, params=resolved)
+        out["object"] = {"type": obj if obj in ("sphere", "cube", "cylinder", "torus", "cone") else "sphere"}
+        if "cloth_size" in resolved:
+            out["object"].update(cloth_size=resolved["cloth_size"], cloth_drop_height=resolved["drop_height"])
+    else:
+        out["object"] = {"type": obj}
+        for pname in given:                                  # V1 behaviour: only explicitly given values are written
+            section, key = {"cloth_size": ("object", "cloth_size"), "drop_height": ("object", "cloth_drop_height")}[pname]
+            out.setdefault(section, {})[key] = resolved[pname]
+
     sim = _obj(data.get("simulation", {}), "simulation")
     _only(sim, _SIMULATION_KEYS, "simulation")
     for key in ("fps", "duration"):
@@ -166,42 +130,46 @@ def experiment_to_legacy(data: dict) -> dict:
         _only(physics, {f.name for f in fields(PhysicsCfg)}, "simulation.physics")
         out["physics"] = dict(physics)
 
-    # stages
     stages = data["stages"]
     if not isinstance(stages, list) or not stages:
         raise ConfigError("stages must be a non-empty list")
-    stage_values: dict[str, list] = {name: [] for name in etype.stage_params}
+    values: list = []
     cameras: list[dict] = []
     for i, st in enumerate(stages):
         path = f"stages[{i}]"
         st = _obj(st, path)
         _only(st, _STAGE_KEYS, path)
         sp = _obj(st.get("params", {}), f"{path}.params")
-        _only(sp, set(etype.stage_params), f"{path}.params")
-        for name, check in etype.stage_params.items():
-            if name not in sp:
-                raise ConfigError(f"{path}.params.{name} is required for {etype.name} ({etype.stage_meaning})")
-            stage_values[name].append(check(sp[name], f"{path}.params.{name}"))
+        _only(sp, {t.stage_param}, f"{path}.params")
+        if t.stage_param not in sp:
+            raise ConfigError(f"{path}.params.{t.stage_param} is required for {t.name} ({t.stage_meaning})")
+        values.append(t.check_stage_value(sp[t.stage_param], f"{path}.params.{t.stage_param}"))
         cam = _obj(st.get("camera", {}), f"{path}.camera")
         _only(cam, set(_CAMERA_OVERRIDE_KEYS), f"{path}.camera")
         for key, value in cam.items():
             _number(value, f"{path}.camera.{key}", positive=key in ("distance", "focal_length"))
         cameras.append(dict(cam))
-    out["resolutions"] = stage_values["faces"]          # cloth_drape's stage parameter (Config's historical name)
-    while cameras and not cameras[-1]:                  # trailing empty overrides mean "use the base camera"
+    if generic:
+        out["stage_values"] = values
+    else:
+        out["resolutions"] = values
+    while cameras and not cameras[-1]:                       # trailing empty overrides mean "use the base camera"
         cameras.pop()
 
-    # camera
-    camera = _obj(data.get("camera", {}), "camera")
+    camera = dict(_obj(data.get("camera", {}), "camera"))
     if "per_stage" in camera:
         raise ConfigError("camera.per_stage is not used in the experiment format; put overrides in stages[].camera")
     _only(camera, _CAMERA_KEYS, "camera")
+    for key in ("preset", "motion"):
+        if key in camera:
+            if not generic:
+                raise ConfigError(f"camera.{key} is only available for the newer experiments, not {t.name}")
+            out[f"camera_{key}"] = camera.pop(key)
     if camera or cameras:
-        out["camera"] = dict(camera)
+        out["camera"] = camera
         if cameras:
             out["camera"]["per_stage"] = cameras
 
-    # hook / video
     video = _obj(data.get("video", {}), "video")
     if "hook" in video or "hook_seconds" in video:
         raise ConfigError("video.hook / video.hook_seconds are not used in the experiment format; use the top-level 'hook'")
@@ -210,6 +178,10 @@ def experiment_to_legacy(data: dict) -> dict:
     if "hook" in data:
         hook = dict(_obj(data["hook"], "hook"))
         _only(hook, _HOOK_KEYS, "hook")
+        if "window" in hook:
+            if not generic:
+                raise ConfigError(f"hook.window is only available for the newer experiments, not {t.name}")
+            out["hook_window"] = hook.pop("window")
         if "seconds" in hook:
             out_video["hook_seconds"] = _number(hook.pop("seconds"), "hook.seconds", positive=True)
         out_video["hook"] = hook
@@ -222,32 +194,60 @@ def experiment_to_legacy(data: dict) -> dict:
     for key in _PASSTHROUGH:
         if key in data:
             out[key] = dict(_obj(data[key], key))
+    if generic:                                              # experiment-specific defaults the file did not set
+        out.setdefault("label", {}).setdefault("template", t.label)
+        if "size" not in out["label"]:                       # long labels shrink so they stay inside the 9:16 frame
+            longest = max(len(t.label.format(**{**resolved, t.stage_param: v, **t.label_values(resolved, v)}))
+                          if out["label"]["template"] == t.label else 0 for v in values)
+            if longest > 13:
+                out["label"]["size"] = round(0.2 * 13 / longest, 3)
+        out["camera_preset"] = out.get("camera_preset", "wide")
+        out.setdefault("hook_window", "start" if t.simulation == "rigid_body" else "end")
+        out_video = out.setdefault("video", {})
+        out_video.setdefault("hook", {}).setdefault("mode", "closeup")
+        out_video["hook"].setdefault("text", "auto")
+        out_video.setdefault("hook_seconds", 2.0)
+        hook_closeup = out_video["hook"].setdefault("closeup", {})
+        if not hook_closeup:
+            last = t.frame_region(resolved, values[-1])
+            from .camera_rig import fit_camera
+            fit = fit_camera(last.half_width, last.top, last.bottom, "close", out.get("camera", {}).get("focal_length", 50.0))
+            hook_closeup.update(distance_start=round(fit["distance"] * 1.25, 3), distance_end=fit["distance"],
+                                height=fit["height"], target_z=fit["target_z"])
     return out
 
 
 # ------------------------------------------------------------------ Config -> new format (migration / describe)
 def to_experiment_dict(cfg: Config) -> dict:
-    """Express a resolved ``Config`` in the experiment format (complete and explicit)."""
-    etype = get_experiment_type(EXPERIMENT_FOR_SIMULATION.get(cfg.simulation))
+    """Express a resolved config in the experiment format (complete and explicit)."""
+    t = get_template(cfg.experiment_type)
     d = asdict(cfg)
     per_stage = [dict(c) for c in d["camera"]["per_stage"]]
+    generic = isinstance(cfg, ExperimentConfig)
+    values = list(cfg.stage_values) if generic else list(cfg.resolutions)
     stages = []
-    for i, faces in enumerate(cfg.resolutions):
-        stage: dict = {"params": {"faces": faces}}
+    for i, v in enumerate(values):
+        stage: dict = {"params": {t.stage_param: v}}
         if i < len(per_stage) and per_stage[i]:
             stage["camera"] = per_stage[i]
         stages.append(stage)
     hook = dict(d["video"]["hook"])
     hook["seconds"] = d["video"]["hook_seconds"]
+    camera = {k: v for k, v in d["camera"].items() if k != "per_stage"}
+    if generic:
+        camera.update(preset=cfg.camera_preset, motion=cfg.camera_motion)
+        hook["window"] = cfg.hook_window
+        params, shape = dict(cfg.params), cfg.shape
+    else:
+        params, shape = {"cloth_size": cfg.object.cloth_size, "drop_height": cfg.object.cloth_drop_height}, cfg.object.type
     return {
         "schema_version": SCHEMA_VERSION,
         "name": cfg.name,
         "seed": cfg.seed,
-        "experiment": {"type": etype.name, "object": cfg.object.type,
-                       "params": {"cloth_size": cfg.object.cloth_size, "drop_height": cfg.object.cloth_drop_height}},
+        "experiment": {"type": t.name, "object": shape, "params": params},
         "simulation": {"fps": cfg.fps, "duration": cfg.duration, "physics": d["physics"]},
         "stages": stages,
-        "camera": {k: v for k, v in d["camera"].items() if k != "per_stage"},
+        "camera": camera,
         "material": d["material"],
         "render": d["render"],
         "output": d["output"],
@@ -267,7 +267,7 @@ class StageSpec:
 
 @dataclass
 class ExperimentSpec:
-    """The experiment-level view of a config (what Phase 3's templates will consume)."""
+    """The experiment-level view of a config."""
     type: str
     object: str
     params: dict
@@ -275,12 +275,10 @@ class ExperimentSpec:
 
 
 def describe(cfg: Config) -> ExperimentSpec:
-    etype = get_experiment_type(EXPERIMENT_FOR_SIMULATION.get(cfg.simulation))
-    stages = [StageSpec(i, {"faces": f}, {k: v for k, v in
-                                          (cfg.camera.per_stage[i] if i < len(cfg.camera.per_stage) else {}).items()})
-              for i, f in enumerate(cfg.resolutions)]
-    return ExperimentSpec(etype.name, cfg.object.type,
-                          {"cloth_size": cfg.object.cloth_size, "drop_height": cfg.object.cloth_drop_height}, stages)
+    t = get_template(cfg.experiment_type)
+    d = to_experiment_dict(cfg)
+    stages = [StageSpec(i, st["params"], st.get("camera", {})) for i, st in enumerate(d["stages"])]
+    return ExperimentSpec(t.name, d["experiment"]["object"], d["experiment"]["params"], stages)
 
 
 # ------------------------------------------------------------------ CLI
@@ -296,7 +294,9 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "list":
             for t in EXPERIMENT_TYPES.values():
-                print(f"{t.name}: {t.description}\n  objects: {', '.join(t.objects)}\n  stage parameter: {t.stage_meaning}")
+                print(f"{t.name}: {t.description}\n  objects: {', '.join(t.objects)}\n"
+                      f"  stage parameter: {t.stage_param} - {t.stage_meaning}\n"
+                      f"  parameters: {', '.join(f'{k}={d.default}' for k, d in t.params.items())}")
         elif args.cmd == "describe":
             spec = describe(load_config(args.config))
             print(json.dumps(asdict(spec), indent=1))

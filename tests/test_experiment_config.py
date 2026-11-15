@@ -106,7 +106,7 @@ def test_invalid_experiment_types(name):
     bad(lambda d: d["experiment"].update(type=name), "experiment type|experiment.type")
 
 
-@pytest.mark.parametrize("name", ["multiple_balls", "ball_funnel", "rings", "paper_drape"])
+@pytest.mark.parametrize("name", ["paper_drape", "pendulum", "softbody_collision", "rope_collision"])
 def test_roadmap_experiments_are_not_pretended_to_exist(name):
     bad(lambda d: d["experiment"].update(type=name), "not implemented yet")
     assert name not in experiment.EXPERIMENT_TYPES

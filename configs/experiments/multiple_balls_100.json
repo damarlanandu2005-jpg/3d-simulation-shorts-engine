@@ -1,0 +1,59 @@
+{
+ "schema_version": 2,
+ "name": "multiple_balls_100",
+ "seed": 0,
+ "experiment": {
+  "type": "multiple_balls",
+  "object": "sphere",
+  "params": {}
+ },
+ "simulation": {
+  "fps": 30,
+  "duration": 3.0
+ },
+ "stages": [
+  {
+   "params": {
+    "balls": 1
+   }
+  },
+  {
+   "params": {
+    "balls": 10
+   }
+  },
+  {
+   "params": {
+    "balls": 50
+   }
+  },
+  {
+   "params": {
+    "balls": 100
+   }
+  }
+ ],
+ "camera": {
+  "preset": "wide",
+  "motion": "static"
+ },
+ "render": {
+  "samples": 16,
+  "denoise": false
+ },
+ "output": {
+  "width": 720,
+  "height": 1280,
+  "dir": "output"
+ },
+ "hook": {
+  "mode": "closeup",
+  "seconds": 2.0,
+  "text": "auto"
+ },
+ "audio": {
+  "enabled": true,
+  "music_enabled": true,
+  "sfx_enabled": true
+ }
+}

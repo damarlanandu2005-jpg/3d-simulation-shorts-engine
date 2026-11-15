@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_SIMULATIONS = ("cloth",)
+SUPPORTED_SIMULATIONS = ("cloth", "rigid_body")
 SUPPORTED_OBJECTS = ("sphere", "cube", "cylinder", "torus", "cone")
 SUPPORTED_CLOTH_STYLES = ("wireframe", "solid")
 SUPPORTED_ENGINES = ("CYCLES",)
@@ -190,14 +190,32 @@ class Config:
     def stages(self) -> list["Stage"]:
         return [make_stage(self, i, faces) for i, faces in enumerate(self.resolutions)]
 
+    @property
+    def stage_count(self) -> int:
+        return len(self.resolutions)
+
     def final_video_path(self) -> Path:
         return self.root_dir / f"{self.name}.mp4"
 
     @property
     def experiment_type(self) -> str:
-        """Experiment type implied by ``simulation`` (derived, so it is not part of the serialised config)."""
-        from .experiment import EXPERIMENT_FOR_SIMULATION
-        return EXPERIMENT_FOR_SIMULATION[self.simulation]
+        """Experiment type (derived, so it is not part of the serialised config). A plain ``Config`` is the V1 cloth drape."""
+        return "cloth_drape"
+
+    def validate_stages(self) -> None:
+        if not self.resolutions:
+            raise ConfigError("resolutions must contain at least one face count")
+        for faces in self.resolutions:
+            faces_to_segments(faces)
+
+    def check_label(self) -> None:
+        format_label(self.label.template, 64)
+
+    def check_hook_text(self) -> None:
+        try:
+            self.video.hook.text.format(total_ratio="256", first="64", last="16,384")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ConfigError(f"video.hook.text is invalid (allowed: {{total_ratio}} {{first}} {{last}}): {exc!r}") from exc
 
     def silent_video_path(self) -> Path:
         """Video before the music is mixed in (only produced when audio is enabled)."""
@@ -255,6 +273,117 @@ class Config:
 
 
 @dataclass
+class ExperimentConfig(Config):
+    """Config of every experiment other than the V1 cloth drape. Same pipeline, experiment-specific data.
+
+    ``params`` holds the experiment's physical parameters (resolved with defaults from its template),
+    ``stage_values`` the progression shown in the video (e.g. 1 -> 10 -> 50 -> 100 balls).
+    The V1 cloth drape stays a plain ``Config`` so its serialised form (and the Phase 1 golden snapshot) never changes.
+    """
+
+    simulation: str = "rigid_body"
+    resolutions: list = field(default_factory=list)   # unused here (cloth_drape's stage parameter)
+    experiment: str = "multiple_balls"
+    shape: str = "sphere"                             # experiment.object
+    params: dict = field(default_factory=dict)
+    stage_values: list = field(default_factory=list)
+    camera_preset: str = "wide"                       # wide | close | top | side | manual (use camera.* as written)
+    camera_motion: str = "static"                     # static | push_in | follow | impact
+    hook_window: str = "start"                        # which part of the last stage the hook replays: start | end
+
+    @property
+    def template(self):
+        from .templates import get_template
+        return get_template(self.experiment)
+
+    @property
+    def experiment_type(self) -> str:
+        return self.experiment
+
+    @property
+    def stage_count(self) -> int:
+        return len(self.stage_values)
+
+    def validate_stages(self) -> None:
+        from .camera_rig import MOTIONS, PRESETS
+        t = self.template
+        if self.simulation != t.simulation:
+            raise ConfigError(f"simulation {self.simulation!r} does not match experiment {t.name!r} ({t.simulation})")
+        if not self.stage_values:
+            raise ConfigError("stages must contain at least one stage")
+        if self.shape not in t.objects:
+            raise ConfigError(f"experiment.object {self.shape!r} is not valid for {t.name}; allowed: {list(t.objects)}")
+        t.resolve_params(self.params)
+        for i, v in enumerate(self.stage_values):
+            t.check_stage_value(v, f"stages[{i}].params.{t.stage_param}")
+        if self.camera_preset not in PRESETS + ("manual",):
+            raise ConfigError(f"camera.preset must be one of {PRESETS + ('manual',)}, got {self.camera_preset!r}")
+        if self.hook_window not in ("start", "end"):
+            raise ConfigError(f"hook.window must be 'start' or 'end', got {self.hook_window!r}")
+        if self.camera_motion not in MOTIONS:
+            raise ConfigError(f"camera.motion must be one of {MOTIONS}, got {self.camera_motion!r}")
+
+    def stages(self) -> list["Stage"]:
+        t, root = self.template, self.root_dir
+        out = []
+        for i, v in enumerate(self.stage_values):
+            tag = f"stage_{i:02d}_{value_tag(v)}"
+            out.append(Stage(index=i, faces=0, segments=0, label=self.stage_label(v),
+                             blend_path=root / tag / f"{tag}.blend", frames_dir=root / tag / "frames",
+                             clip_path=root / tag / f"{tag}.mp4", params={t.stage_param: v}))
+        return out
+
+    def check_label(self) -> None:
+        for v in self.stage_values:
+            self.stage_label(v)
+
+    def hook_frame_range(self) -> tuple[int, int]:
+        n = min(self.frame_count, max(1, round(self.video.hook_seconds * self.fps)))
+        return (1, n) if self.hook_window == "start" else (self.frame_count - n + 1, self.frame_count)
+
+    def stage_label(self, value) -> str:
+        t = self.template
+        return self.label.template.format(**{**self.params, t.stage_param: value, **t.label_values(self.params, value)})
+
+    def cards(self) -> list["Card"]:
+        return []
+
+    def check_hook_text(self) -> None:
+        t = self.template
+        text = self.video.hook.text
+        if text in ("", "auto"):
+            return
+        try:
+            text.format(**t.hook_values(t.resolve_params(self.params), self.stage_values or [1]))
+        except (KeyError, IndexError, ValueError, ZeroDivisionError) as exc:
+            raise ConfigError(f"video.hook.text is invalid for {t.name} (allowed placeholders: "
+                              f"{sorted(t.hook_values(t.resolve_params(self.params), [1, 2]))}): {exc!r}") from exc
+
+    def hook_text(self) -> str:
+        t = self.template
+        vals = t.hook_values(self.params, self.stage_values)
+        text = self.video.hook.text
+        if text == "auto":
+            text = t.hooks[self.seed % len(t.hooks)]
+        return text.format(**vals)
+
+    def camera_for_stage(self, index: int) -> CameraCfg:
+        override = self.camera.per_stage[index] if index < len(self.camera.per_stage) else {}
+        if self.camera_preset == "manual":
+            return replace(self.camera, per_stage=[], **override)
+        from .camera_rig import fit_camera
+        t = self.template
+        region = t.frame_region(self.params, self.stage_values[index])
+        fit = fit_camera(region.half_width, region.top, region.bottom, self.camera_preset, self.camera.focal_length)
+        return replace(self.camera, per_stage=[], **{**fit, **override})
+
+
+def value_tag(v) -> str:
+    """File-name-safe tag of a stage value (0.42 -> 0p42)."""
+    return (f"{v:g}" if isinstance(v, float) else str(v)).replace(".", "p").replace("-", "m")
+
+
+@dataclass
 class Card:
     index: int  # shown after stage `index`
     ratio: str
@@ -274,6 +403,7 @@ class Stage:
     blend_path: Path
     frames_dir: Path
     clip_path: Path
+    params: dict = field(default_factory=dict)   # experiment-specific stage parameters (e.g. {"balls": 50})
 
 
 def faces_to_segments(faces: int) -> int:
@@ -371,10 +501,7 @@ def validate(cfg: Config) -> Config:
         raise ConfigError(f"object.type must be one of {SUPPORTED_OBJECTS}, got {cfg.object.type!r}")
     if not cfg.name or any(c in cfg.name for c in "/\\ "):
         raise ConfigError("name must be non-empty and contain no spaces or slashes")
-    if not cfg.resolutions:
-        raise ConfigError("resolutions must contain at least one face count")
-    for faces in cfg.resolutions:
-        faces_to_segments(faces)
+    cfg.validate_stages()
     if cfg.fps < 1 or cfg.fps > 120:
         raise ConfigError("fps must be between 1 and 120")
     if cfg.duration <= 0 or cfg.duration > 60:
@@ -402,7 +529,7 @@ def validate(cfg: Config) -> Config:
     _validate_video(cfg)
     _validate_simulation(cfg)
     try:
-        format_label(cfg.label.template, 64)
+        cfg.check_label()
     except (KeyError, IndexError, ValueError) as exc:
         raise ConfigError(f"label.template is invalid: {exc!r}") from exc
     return cfg
@@ -435,8 +562,8 @@ def _validate_simulation(cfg: Config) -> None:
 
 
 def _validate_camera(cfg: Config) -> None:
-    if len(cfg.camera.per_stage) > len(cfg.resolutions):
-        raise ConfigError("camera.per_stage has more entries than resolutions")
+    if len(cfg.camera.per_stage) > cfg.stage_count:
+        raise ConfigError("camera.per_stage has more entries than stages")
     for i, override in enumerate(cfg.camera.per_stage):
         if not isinstance(override, dict):
             raise ConfigError(f"camera.per_stage[{i}] must be an object")
@@ -456,10 +583,7 @@ def _validate_video(cfg: Config) -> None:
         raise ConfigError("video.hook_seconds must be >= 0")
     if v.hook.mode not in SUPPORTED_HOOK_MODES:
         raise ConfigError(f"video.hook.mode must be one of {SUPPORTED_HOOK_MODES}")
-    try:
-        v.hook.text.format(total_ratio="256", first="64", last="16,384")
-    except (KeyError, IndexError, ValueError) as exc:
-        raise ConfigError(f"video.hook.text is invalid (allowed: {{total_ratio}} {{first}} {{last}}): {exc!r}") from exc
+    cfg.check_hook_text()
     if v.hook.mode == "closeup":
         c = v.hook.closeup
         if v.hook_seconds <= 0:
@@ -470,6 +594,8 @@ def _validate_video(cfg: Config) -> None:
             raise ConfigError("video.hook.closeup.samples must be >= 0")
     if v.cards.enabled:
         c = v.cards
+        if cfg.experiment_type != "cloth_drape":
+            raise ConfigError("video.cards (multiplier cards) are only available for cloth_drape")
         if len(cfg.resolutions) < 2:
             raise ConfigError("video.cards needs at least two resolutions")
         if any(b <= a for a, b in zip(cfg.resolutions, cfg.resolutions[1:])):
@@ -505,7 +631,8 @@ def from_dict(data: dict) -> Config:
     if isinstance(data, dict) and ("experiment" in data or "schema_version" in data):
         from .experiment import experiment_to_legacy  # lazy: experiment.py imports this module
         data = experiment_to_legacy(data)
-    return validate(_build(Config, data, ""))
+    cls = ExperimentConfig if isinstance(data, dict) and "experiment" in data else Config
+    return validate(_build(cls, data, ""))
 
 
 def load_config(path: str | Path) -> Config:

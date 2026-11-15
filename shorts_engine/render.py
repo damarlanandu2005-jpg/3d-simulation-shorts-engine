@@ -117,7 +117,7 @@ def plan_jobs(
         st = all_stages[i]
         base = ["--config", str(config_path), "--stage", str(i)]
         if do_bake:
-            jobs.append(Job(f"bake stage {i} ({st.faces} faces)", "bake",
+            jobs.append(Job(f"bake stage {i} ({st.label})", "bake",
                             scene_cmd(runner, use_blender, base + ["--mode", "build"]), i))
         if do_render:
             for (a, b) in split_frame_range(fs, fe, chunks):
@@ -244,6 +244,43 @@ def summarize(cfg: Config, results: list[dict], total_wall: float) -> dict:
     }
 
 
+def git_sha() -> str | None:
+    try:
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=Path(__file__).parent, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def build_metadata(cfg: Config, config_path: str) -> dict:
+    """Everything needed to reproduce / catalogue a video: the resolved config, experiment view, seed, code version."""
+    from dataclasses import asdict
+    from . import experiment, timeline
+    meta = {
+        "name": cfg.name,
+        "experiment": cfg.experiment_type,
+        "seed": cfg.seed,
+        "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "config_file": str(config_path),
+        "config": asdict(cfg),
+        "experiment_config": experiment.to_experiment_dict(cfg),
+        "stage_labels": [st.label for st in cfg.stages()],
+        "planned_seconds": timeline.total_seconds(cfg),
+        "resolution": f"{cfg.output.width}x{cfg.output.height}",
+        "fps": cfg.fps,
+        "audio": cfg.audio.enabled,
+        "git_sha": git_sha(),
+        "python": sys.version.split()[0],
+    }
+    sidecar = Path(str(config_path) + ".meta.json")          # written by the batch generator
+    if sidecar.is_file():
+        try:
+            meta["variation"] = json.loads(sidecar.read_text())
+        except json.JSONDecodeError:
+            pass
+    return meta
+
+
 def run_jobs(jobs: list[Job], dry_run: bool = False) -> list[dict]:
     results = []
     for job in jobs:
@@ -293,6 +330,7 @@ def main(argv=None) -> int:
     p.add_argument("--only-extras", action="store_true",
                    help="re-render only the closeup hook and cards (stages must already be rendered), then assemble")
     p.add_argument("--dry-run", action="store_true", help="print the commands without running anything")
+    p.add_argument("--no-qc", action="store_true", help="skip the automatic quality check of the finished video")
     args = p.parse_args(argv)
 
     try:
@@ -327,8 +365,22 @@ def main(argv=None) -> int:
         bench.write_text(json.dumps({"summary": summary, "jobs": results}, indent=2))
         print(f"\nbenchmark written to {bench}")
         print(json.dumps(summary, indent=2))
+        (cfg.root_dir / "metadata.json").write_text(json.dumps(build_metadata(cfg, args.config), indent=1))
         if cfg.final_video_path().exists():
             print(f"final video: {cfg.final_video_path()}")
+            full = stages is None and not args.frame_start and not args.frame_end and not (args.bake_only or args.no_assemble)
+            if full and not args.no_qc:
+                from . import qc
+                if not qc.have_ffprobe():
+                    print("QC skipped: ffprobe not found")
+                else:
+                    report = qc.run_qc(cfg, args.skip_extras)
+                    qc.write_report(cfg, report)
+                    for c in report.checks:
+                        print(f"  qc [{'ok' if c.ok else 'FAIL'}] {c.name}: {c.detail}")
+                    if not report.passed:
+                        print("QC FAILED: " + "; ".join(c.name for c in report.failed()), file=sys.stderr)
+                        return 3
     return 0
 
 

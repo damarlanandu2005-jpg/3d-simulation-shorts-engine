@@ -194,3 +194,18 @@ def test_full_pipeline_for_a_new_experiment_produces_video(tmp_path):
     assert (root / "full.mp4").is_file() and (root / "benchmark.json").is_file()
     cues = json.loads((root / "audio_timeline.json").read_text())["sfx"]
     assert cues, "physics events produced sound effects"
+
+
+def test_pipeline_writes_metadata_benchmark_and_a_passing_qc_report(tmp_path):
+    """The render orchestrator runs QC automatically and writes metadata for every finished video."""
+    import shutil
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        pytest.skip("ffmpeg/ffprobe not installed")
+    from shorts_engine import render
+    cfg = write_cfg(tmp_path, "ball_funnel", "sphere", [0.8, 0.5], name="qcrun", duration=1.0, fps=24, size=(90, 160))
+    assert render.main(["--config", str(cfg), "--use-bpy"]) == 0
+    root = tmp_path / "qcrun"
+    qc = json.loads((root / "qc_report.json").read_text())
+    assert qc["passed"], [c for c in qc["checks"] if not c["ok"]]
+    meta = json.loads((root / "metadata.json").read_text())
+    assert meta["experiment"] == "ball_funnel" and meta["resolution"] == "90x160" and meta["experiment_config"]["stages"]

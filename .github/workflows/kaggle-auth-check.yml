@@ -22,21 +22,28 @@ jobs:
           python -m pip install --quiet --upgrade kaggle six
           kaggle --version
 
-      - name: Check secrets are present (values are never printed)
+      - name: Check username secret is present
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: '[ -n "$KAGGLE_USERNAME" ] && echo "KAGGLE_USERNAME present: true" || { echo "KAGGLE_USERNAME present: false"; exit 1; }'
+
+      - name: Select Kaggle auth method (new KGAT_ token or legacy 32-hex key; value never printed)
+        env:
+          RAW_KAGGLE_SECRET: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          [ -n "$KAGGLE_USERNAME" ] && echo "KAGGLE_USERNAME present: true" || { echo "KAGGLE_USERNAME present: false"; exit 1; }
-          [ -n "$KAGGLE_API_TOKEN" ] && echo "KAGGLE_API_TOKEN present: true" || { echo "KAGGLE_API_TOKEN present: false"; exit 1; }
+          if [ -z "$RAW_KAGGLE_SECRET" ]; then echo "::error::KAGGLE_API_TOKEN secret missing"; exit 1; fi
+          case "$RAW_KAGGLE_SECRET" in
+            KGAT_*) echo "KAGGLE_API_TOKEN=$RAW_KAGGLE_SECRET" >> "$GITHUB_ENV"; echo "auth method: access token (KGAT_)" ;;
+            *)      echo "KAGGLE_KEY=$RAW_KAGGLE_SECRET" >> "$GITHUB_ENV"; echo "auth method: legacy username+key" ;;
+          esac
 
       - name: Token shape (diagnostic; never prints the value)
         env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           python - <<'PY'
           import os
-          t = os.environ["KAGGLE_API_TOKEN"]
+          t = os.environ.get("KAGGLE_API_TOKEN") or os.environ.get("KAGGLE_KEY", "")
           print("length:", len(t))
           print("starts with KGAT_:", t.startswith("KGAT_"))
           print("has whitespace/newline:", t != t.strip() or any(c.isspace() for c in t))
@@ -47,7 +54,6 @@ jobs:
       - name: Authenticated API call (kaggle datasets list)
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           if out=$(kaggle datasets list --page-size 1 2>&1); then
             echo "Kaggle authentication OK: API call succeeded"
@@ -60,7 +66,6 @@ jobs:
       - name: Authenticated kernels API call
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           if kaggle kernels list --mine --page-size 1 > /dev/null; then
             echo "Kaggle kernels API reachable with these credentials"

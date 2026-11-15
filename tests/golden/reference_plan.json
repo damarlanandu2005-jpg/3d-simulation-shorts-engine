@@ -1,0 +1,71 @@
+{
+ "job_kinds": [
+  "bake",
+  "render",
+  "bake",
+  "render",
+  "bake",
+  "render",
+  "bake",
+  "render",
+  "events",
+  "events",
+  "events",
+  "events",
+  "hook_render",
+  "clip",
+  "clip",
+  "clip",
+  "clip",
+  "hook",
+  "concat",
+  "audio"
+ ],
+ "concat_order": [
+  "hook.mp4",
+  "stage_00_64.mp4",
+  "stage_01_1024.mp4",
+  "stage_02_4096.mp4",
+  "stage_03_16384.mp4"
+ ],
+ "total_seconds": 14.0,
+ "segments": [
+  [
+   "hook",
+   3,
+   31,
+   90,
+   0.0
+  ],
+  [
+   "stage",
+   0,
+   1,
+   90,
+   2.0
+  ],
+  [
+   "stage",
+   1,
+   1,
+   90,
+   5.0
+  ],
+  [
+   "stage",
+   2,
+   1,
+   90,
+   8.0
+  ],
+  [
+   "stage",
+   3,
+   1,
+   90,
+   11.0
+  ]
+ ],
+ "final_video": "v1_1_a/v1_1_a.mp4",
+ "silent_video": "v1_1_a/v1_1_a_silent.mp4"
+}

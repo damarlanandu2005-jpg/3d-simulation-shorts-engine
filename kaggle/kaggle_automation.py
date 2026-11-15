@@ -265,6 +265,16 @@ def wait(kernel: str, timeout_s: int, interval_s: int, max_queue_s: int = 0) -> 
     raise AutomationError(f"timed out after {timeout_s}s waiting for the kernel (last status: {last})")
 
 
+def expected_result_files(key: str) -> set[str]:
+    """The only files a kernel run should leave in its result folder."""
+    return {f"{resolve_config(key)[1]}.mp4", "benchmark.json", "run_info.json", "render.log"}
+
+
+def unexpected_files(out: Path, key: str) -> list[str]:
+    """Names in the result folder that are not part of the expected set (reported as a warning)."""
+    return sorted(p.name for p in out.iterdir() if p.name not in expected_result_files(key))
+
+
 def verify_output(out: Path, key: str) -> None:
     _, name = resolve_config(key)
     problems = []
@@ -317,6 +327,9 @@ def main(argv=None) -> int:
             wait(args.kernel, args.timeout, args.interval, args.max_queue)
         else:
             verify_output(args.dir, args.test_config)
+            extras = unexpected_files(args.dir, args.test_config)
+            if extras:
+                print(f"WARNING: unexpected files in the result folder: {extras}")
             print("output verified")
     except AutomationError as e:
         print(f"ERROR: {e}", file=sys.stderr)

@@ -247,6 +247,22 @@ tests/
 
 See `LICENSES.md`. No third-party code is copied. Add your own `LICENSE` file before sharing the repo.
 
+## Reference pipeline (frozen)
+
+`configs/v1_1_a_baseline.json` (cloth draping over a sphere, 720x1280, 16 samples, no denoise, closeup hook,
+stage labels, no multiplier cards, music + physics SFX, 14 s) is the **production reference**. Every later
+experiment must leave it working. It is protected by:
+
+* `tests/golden/reference_config.json` and `reference_plan.json`: exact snapshots of the resolved config and of the job
+  plan (job kinds, concat order, durations). Intentional change: `python tools/update_golden.py`, review the diff.
+* `tests/test_reference_pipeline.py`: explicit production facts (9:16, labels, no cards, audio on, OptiX never mandatory),
+  Kaggle workflow input checks (fixed config mapping, no secrets printed), result-folder allow-list, and a **real
+  Blender + FFmpeg end-to-end run** on a tiny scene (needs `bpy`; checks aspect ratio, fps, video + audio streams and
+  durations, every frame present, no card output, concat order, `benchmark.json`, `audio_timeline.json`, an impact cue).
+
+Kaggle result folder contract: only `<name>.mp4`, `benchmark.json`, `run_info.json`, `render.log` (the verify step warns
+about anything else). Last verified on Kaggle: run 43753321122, 14.000 s, 720x1280 H.264 + AAC.
+
 ## V1.1 update: no multiplier cards, background music
 
 * **Multiplier cards** (`x16 MORE` etc.) are now off in the V1.1 configs via `video.cards.enabled = false`.

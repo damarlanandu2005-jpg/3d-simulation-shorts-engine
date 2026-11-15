@@ -1,0 +1,141 @@
+{
+ "audio": {
+  "enabled": true,
+  "fade_in": 0.5,
+  "fade_out": 1.0,
+  "music": "assets/audio/music/default_music.wav",
+  "music_enabled": true,
+  "sfx_dir": "assets/audio/sfx",
+  "sfx_enabled": true,
+  "sfx_max_events": 24,
+  "sfx_min_gap": 0.15,
+  "sfx_min_strength": 0.15,
+  "sfx_volume_db": -8,
+  "volume_db": -18
+ },
+ "camera": {
+  "distance": 11.0,
+  "focal_length": 50,
+  "height": 4.8,
+  "per_stage": [
+   {},
+   {
+    "distance": 10.4
+   },
+   {
+    "distance": 9.8
+   },
+   {
+    "distance": 9.2
+   }
+  ],
+  "target_z": 1.0
+ },
+ "duration": 3.0,
+ "fps": 30,
+ "label": {
+  "color": [
+   0.08,
+   0.08,
+   0.08,
+   1.0
+  ],
+  "size": 0.2,
+  "template": "{faces:,} FACES"
+ },
+ "material": {
+  "background_color": [
+   0.72,
+   0.72,
+   0.74,
+   1.0
+  ],
+  "cloth_color": [
+   0.8,
+   0.8,
+   0.85,
+   1.0
+  ],
+  "cloth_metallic": 1.0,
+  "cloth_roughness": 0.25,
+  "cloth_style": "wireframe",
+  "ground_color": [
+   0.45,
+   0.45,
+   0.47,
+   1.0
+  ],
+  "object_color": [
+   0.05,
+   0.55,
+   0.1,
+   1.0
+  ],
+  "object_roughness": 0.15
+ },
+ "name": "v1_1_a",
+ "object": {
+  "cloth_drop_height": 1.3,
+  "cloth_size": 4.4,
+  "type": "sphere"
+ },
+ "output": {
+  "dir": "output",
+  "height": 1280,
+  "width": 720
+ },
+ "physics": {
+  "air_damping": 1.0,
+  "bending": 0.5,
+  "collision_distance": 0.015,
+  "compression": 15.0,
+  "gravity": 9.81,
+  "mass": 0.3,
+  "quality": 7,
+  "self_collision": true,
+  "shear": 15.0,
+  "tension": 15.0
+ },
+ "render": {
+  "denoise": false,
+  "denoiser": "OPENIMAGEDENOISE",
+  "device": "AUTO",
+  "engine": "CYCLES",
+  "max_bounces": 4,
+  "samples": 16
+ },
+ "resolutions": [
+  64,
+  1024,
+  4096,
+  16384
+ ],
+ "seed": 0,
+ "simulation": "cloth",
+ "video": {
+  "cards": {
+   "enabled": false,
+   "samples": 8,
+   "seconds": 0.5,
+   "subtitle": "MORE FACES",
+   "subtitle_size": 0.28,
+   "title": "\u00d7{ratio}",
+   "title_size": 0.9
+  },
+  "crf": 18,
+  "hook": {
+   "closeup": {
+    "distance_end": 5.6,
+    "distance_start": 7.0,
+    "height": 3.0,
+    "samples": 32,
+    "target_z": 1.3
+   },
+   "mode": "closeup",
+   "text": "WHAT HAPPENS WHEN\nWE ADD {total_ratio}\u00d7\nMORE FACES?",
+   "text_size": 0.09,
+   "text_y": 0.72
+  },
+  "hook_seconds": 2.0
+ }
+}

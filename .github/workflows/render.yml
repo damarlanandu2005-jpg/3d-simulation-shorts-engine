@@ -1,0 +1,47 @@
+name: render-smoke
+
+# Manual only. Runs the unit tests, then a tiny CPU render through the full pipeline and
+# uploads the mp4 + benchmark.json. GitHub's free runners have NO GPU, so this is a pipeline
+# check, not a production render.
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Config file to render (use the tiny smoke config on free runners)
+        default: configs/ci_smoke.json
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # bpy 4.5 LTS wheels are cp311 only
+
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6
+
+      - name: Python packages
+        run: pip install -r requirements.txt
+
+      - name: Unit tests (includes real Blender tests, since bpy is installed)
+        run: python -m pytest -q
+
+      - name: Render
+        env:
+          CONFIG: ${{ inputs.config }}
+        run: python -m shorts_engine.render --config "$CONFIG" --use-bpy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shorts-output
+          path: |
+            output/*/*.mp4
+            output/*/benchmark.json
+          if-no-files-found: error

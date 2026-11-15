@@ -1,0 +1,5 @@
+# Blender as a Python module. Must match Python 3.11 (bpy 4.5 LTS wheels are cp311 only).
+# Not needed if you run a normal Blender 4.5 install with --blender / BLENDER_BIN.
+bpy==4.5.16; python_version == "3.11"
+numpy<2
+pytest>=8

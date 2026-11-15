@@ -1,0 +1,9 @@
+{
+  "name": "ci_smoke",
+  "simulation": "cloth",
+  "resolutions": [64, 256],
+  "fps": 12,
+  "duration": 1.5,
+  "output": {"width": 180, "height": 320, "dir": "output"},
+  "render": {"samples": 6, "device": "CPU"}
+}

@@ -135,6 +135,19 @@ jobs:
           print("summary:", json.dumps(b.get("summary"), indent=1))
           PY
 
+      - name: Inspect final video streams (audio present? durations)
+        run: |
+          mp4=$(ls "$RESULT_DIR"/*.mp4 | head -1)
+          echo "video file: $mp4"
+          ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,duration -of compact "$mp4" | tee -a "$GITHUB_STEP_SUMMARY"
+          python - <<'PY'
+          import json, os
+          jobs = json.load(open(os.environ["RESULT_DIR"] + "/benchmark.json"))["jobs"]
+          kinds = [j["kind"] for j in jobs]
+          print("job kinds:", {k: kinds.count(k) for k in dict.fromkeys(kinds)})
+          print("card jobs present:", "card_render" in kinds, "| audio mix job present:", "audio" in kinds)
+          PY
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:

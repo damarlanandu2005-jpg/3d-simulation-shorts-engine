@@ -129,6 +129,19 @@ Run locally the script was only tested on a CPU-only machine (it correctly repor
 `setup_kaggle.sh` and everything GPU-related are untested. Never commit credentials; if you later
 automate Kaggle from GitHub Actions, keep the token in a GitHub Secret (e.g. `KAGGLE_API_TOKEN`).
 
+### Sample-count / denoising sweep
+
+After the benchmark, find the cheapest Cycles settings that still look good:
+
+```python
+!python kaggle/quality_sweep.py     # samples 32/16/8, each with and without denoising, vs a 128-sample reference
+```
+
+It bakes once, renders the same frames for every variant, prints seconds per frame plus PSNR/SSIM
+against the reference, and saves `output/quality_sweep/compare/montage.png` (reference, then each
+variant left to right). Treat the scores as a rough guide and look at the images. Locally this was
+run on a tiny CPU scene only, not on a GPU.
+
 ## GitHub Actions
 
 `.github/workflows/render.yml` is a manually triggered pipeline check (tests + tiny CPU render +
@@ -139,8 +152,8 @@ production renders.
 
 ```bash
 pip install pytest
-python -m pytest -q            # config, planning, ffmpeg commands (no Blender needed)
-pip install "bpy==4.5.16"      # Python 3.11; enables the 3 real Blender tests
+python -m pytest -q            # 37 tests: config, planning, ffmpeg commands (no Blender needed)
+pip install "bpy==4.5.16"      # Python 3.11; enables the 4 real Blender tests
 python -m pytest -q
 ```
 
@@ -156,7 +169,7 @@ shorts_engine/
   render.py          plans and runs bake -> render -> ffmpeg, writes benchmark.json
   assemble.py        FFmpeg command builders (no bpy)
 configs/             example_cloth.json, ci_smoke.json
-kaggle/              setup_kaggle.sh, gpu_benchmark.py
+kaggle/              setup_kaggle.sh, gpu_benchmark.py, quality_sweep.py
 tests/
 ```
 

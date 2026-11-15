@@ -49,13 +49,11 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def configure_scene(scene, cfg) -> None:
+def apply_render_settings(scene, cfg) -> None:
+    """Settings that must follow the CURRENT config at render time (not the value saved in the .blend)."""
     scene.render.resolution_x = cfg.output.width
     scene.render.resolution_y = cfg.output.height
     scene.render.resolution_percentage = 100
-    scene.render.fps = cfg.fps
-    scene.frame_start = 1
-    scene.frame_end = cfg.frame_count
     scene.render.engine = cfg.render.engine
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
@@ -66,6 +64,13 @@ def configure_scene(scene, cfg) -> None:
     cy.use_denoising = cfg.render.denoise
     if cfg.render.denoise:
         cy.denoiser = "OPENIMAGEDENOISE"
+
+
+def configure_scene(scene, cfg) -> None:
+    scene.render.fps = cfg.fps
+    scene.frame_start = 1
+    scene.frame_end = cfg.frame_count
+    apply_render_settings(scene, cfg)
 
 
 def select_device(scene, requested: str) -> str:
@@ -121,6 +126,7 @@ def build_stage(cfg, stage) -> None:
 def render_stage(cfg, stage, frame_start, frame_end) -> None:
     bpy.ops.wm.open_mainfile(filepath=str(stage.blend_path.resolve()))
     scene = bpy.context.scene
+    apply_render_settings(scene, cfg)  # samples/denoise/resolution come from the config, not the saved .blend
     device = select_device(scene, cfg.render.device)
     stage.frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -144,7 +150,8 @@ def render_stage(cfg, stage, frame_start, frame_end) -> None:
     metric(stage=stage.index, faces=stage.faces, render_seconds=round(render_s, 2), device=device,
            frames_rendered=rendered, frames_skipped=skipped,
            seconds_per_frame=round(render_s / rendered, 2) if rendered else None,
-           samples=cfg.render.samples, width=cfg.output.width, height=cfg.output.height)
+           samples=scene.cycles.samples, denoise=scene.cycles.use_denoising,
+           width=scene.render.resolution_x, height=scene.render.resolution_y)
 
 
 def main(argv=None) -> None:

@@ -61,3 +61,15 @@ def test_cloth_actually_moves(cfg_path, tmp_path):
     _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "12", "--frame-end", "12")
     frames = tmp_path / "smoke" / "stage_00_64" / "frames"
     assert (frames / "frame_0001.png").read_bytes() != (frames / "frame_0012.png").read_bytes()
+
+
+def test_render_settings_follow_current_config_not_the_saved_blend(cfg_path, tmp_path):
+    """Regression: samples/denoise were frozen into the .blend at build time."""
+    _run(cfg_path, "--stage", "0", "--mode", "build")          # built with samples=2
+    cfg = json.loads(cfg_path.read_text())
+    cfg["render"].update({"samples": 5, "denoise": False})
+    cfg["output"].update({"width": 120, "height": 214})
+    cfg_path.write_text(json.dumps(cfg))
+    m = _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "3", "--frame-end", "3")[0]
+    assert m["samples"] == 5 and m["denoise"] is False
+    assert (m["width"], m["height"]) == (120, 214)

@@ -134,8 +134,8 @@ def build_stage(cfg, stage) -> None:
     label_mat = materials.emission("LabelMat", cfg.label.color, 1.0)
     camera.add_label(scene, cam, stage.label, cfg.label.size, label_mat)
 
-    builder = simulation.SIMULATORS[cfg.simulation]
-    cloth = builder(scene, cfg, stage)
+    builder = simulation.SIMULATORS[cfg.experiment_type]
+    handle = builder(scene, cfg, stage)
 
     # The disk cache lives next to the .blend, so save before baking.
     stage.blend_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,10 +143,10 @@ def build_stage(cfg, stage) -> None:
     setup_s = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    method = simulation.bake(scene, cloth, 1, cfg.frame_count)
+    method = simulation.bake_for(cfg, scene, handle, cfg.frame_count)
     bake_s = time.perf_counter() - t1
     bpy.ops.wm.save_mainfile()
-    metric(stage=stage.index, faces=stage.faces, setup_seconds=round(setup_s, 2),
+    metric(stage=stage.index, faces=stage.faces, params=stage.params, setup_seconds=round(setup_s, 2),
            bake_seconds=round(bake_s, 2), bake_method=method, frames=cfg.frame_count)
 
 
@@ -170,8 +170,42 @@ def render_stage(cfg, stage, frame_start, frame_end) -> None:
     if not (1 <= frame_start <= frame_end <= cfg.frame_count):
         raise SystemExit(f"frame range {frame_start}-{frame_end} outside 1-{cfg.frame_count}")
 
+    motion = getattr(cfg, "camera_motion", "static")
+    before = camera_motion_callback(cfg, stage) if motion != "static" else None
     render_frames(scene, range(frame_start, frame_end + 1), lambda f: stage.frames_dir / f"frame_{f:04d}.png",
-                  stage.index, stage.faces, device, denoiser)
+                  stage.index, stage.faces, device, denoiser, before_frame=before)
+
+
+def tracked_objects():
+    """The moving bodies of a rigid-body scene (balls, rings)."""
+    return [o for o in bpy.data.objects if o.name.startswith(("Ball_", "Ring_"))]
+
+
+def strongest_event_frame(cfg, stage):
+    from shorts_engine import events as ev
+    path = cfg.stage_events_path(stage.index)
+    if not path.is_file():
+        return None
+    found = ev.load_events(path)
+    return int(round(max(found, key=lambda e: e.strength).frame)) if found else None
+
+
+def camera_motion_callback(cfg, stage):
+    """Per-frame camera move (push-in / follow / impact punch-in) from the experiment's camera.motion."""
+    from shorts_engine import camera_rig
+    base = cfg.camera_for_stage(stage.index)
+    event_frame = strongest_event_frame(cfg, stage) if cfg.camera_motion == "impact" else None
+    objs = tracked_objects()
+
+    def move(frame):
+        m = camera_rig.motion_offsets(cfg.camera_motion, frame, cfg.frame_count, event_frame)
+        xy = (0.0, 0.0)
+        if m["target_follow"] and objs:
+            xy = (m["target_follow"] * sum(o.location.x for o in objs) / len(objs),
+                  m["target_follow"] * sum(o.location.y for o in objs) / len(objs))
+        camera.apply_camera(replace(base, distance=base.distance * m["distance_scale"],
+                                    height=base.target_z + (base.height - base.target_z) * m["distance_scale"]), xy)
+    return move
 
 
 def render_frames(scene, frames, path_for, stage_index, faces, device, denoiser, before_frame=None, kind="render"):
@@ -257,28 +291,41 @@ def render_card(cfg, card_index: int) -> None:
 def detect_stage_events(cfg, stage) -> None:
     """Read the baked simulation and write ``events.json`` (physical events for the sound-effect layer).
 
-    Thin read-only layer: it steps through the baked cache, measures how close a sample of cloth vertices
-    gets to each collider, and turns approaches into events (see events.detect_contacts). Nothing about the
-    physics or the render is changed, and nothing is saved back to the .blend.
+    Thin read-only layer: it steps through the baked result and turns contacts into events (see events.py).
+    Nothing about the physics or the render is changed, and nothing is saved back to the .blend.
     """
-
-    import numpy as np
-    from mathutils import bvhtree
-
     from shorts_engine import events as ev
 
     require_blend(stage)
     bpy.ops.wm.open_mainfile(filepath=str(stage.blend_path.resolve()))
     scene = bpy.context.scene
-    cloth, collider = bpy.data.objects["Cloth"], bpy.data.objects["Collider"]
+    t0 = time.perf_counter()
+    kind = cfg.template.events if hasattr(cfg, "template") else "cloth"
+    found, debug = EVENT_DETECTORS[kind](cfg, scene)
+    found.sort(key=lambda e: e.frame)
+    path = cfg.stage_events_path(stage.index)
+    ev.save_events(path, found, cfg.fps, stage.index, debug)
+    metric(kind="events", stage=stage.index, faces=stage.faces, events=len(found),
+           seconds=round(time.perf_counter() - t0, 2), path=str(path))
+
+
+def cloth_events(cfg, scene):
+    """Cloth: distance of a sample of cloth vertices to every collider and to the ground."""
+    import numpy as np
+    from mathutils import bvhtree
+
+    from shorts_engine import events as ev
+
+    cloth = bpy.data.objects["Cloth"]
+    colliders = [o for o in bpy.data.objects if o.name.startswith("Collider")]
     for mod in cloth.modifiers:                      # look only at the simulated mesh, not wireframe/solidify
         if mod.type != "CLOTH":
             mod.show_viewport = False
-    world = collider.matrix_world
-    tree = bvhtree.BVHTree.FromPolygons([world @ v.co for v in collider.data.vertices],
-                                        [tuple(p.vertices) for p in collider.data.polygons])
-
-    t0 = time.perf_counter()
+    trees = []
+    for collider in colliders:
+        world = collider.matrix_world
+        trees.append(bvhtree.BVHTree.FromPolygons([world @ v.co for v in collider.data.vertices],
+                                                  [tuple(p.vertices) for p in collider.data.polygons]))
     n = len(cloth.data.vertices)
     sample = np.unique(np.linspace(0, n - 1, min(n, 1500)).astype(int))
     d_collider, d_ground = [], []
@@ -292,10 +339,11 @@ def detect_stage_events(cfg, stage) -> None:
         pts = pts.reshape(-1, 3)[sample]
         d_ground.append(float(pts[:, 2].min()))
         best = float("inf")
-        for p in pts:
-            hit = tree.find_nearest(p)
-            if hit[0] is not None:
-                best = min(best, hit[3])
+        for tree in trees:
+            for p in pts:
+                hit = tree.find_nearest(p)
+                if hit[0] is not None:
+                    best = min(best, hit[3])
         d_collider.append(best)
 
     # cloth rests about 2x collision_distance (+ collider thickness) away from the surface, so 'touching' is a bit above that
@@ -303,14 +351,31 @@ def detect_stage_events(cfg, stage) -> None:
     ref = math.sqrt(2 * cfg.physics.gravity * max(cfg.object.cloth_drop_height, 0.1))  # free-fall speed over the drop
     found = (ev.detect_contacts(d_collider, cfg.fps, thr, ref, "impact", "bounce", "Collider")
              + ev.detect_contacts(d_ground, cfg.fps, thr, ref, "landing", "landing", "Ground"))
-    found.sort(key=lambda e: e.frame)
-    path = cfg.stage_events_path(stage.index)
-    ev.save_events(path, found, cfg.fps, stage.index,
-                   {"threshold": round(thr, 4), "ref_speed": round(ref, 3),
-                    "collider_distance": [round(d, 4) for d in d_collider],
-                    "ground_distance": [round(d, 4) for d in d_ground]})
-    metric(kind="events", stage=stage.index, faces=stage.faces, events=len(found),
-           seconds=round(time.perf_counter() - t0, 2), path=str(path))
+    return found, {"threshold": round(thr, 4), "ref_speed": round(ref, 3),
+                   "collider_distance": [round(d, 4) for d in d_collider],
+                   "ground_distance": [round(d, 4) for d in d_ground]}
+
+
+def impulse_events(cfg, scene):
+    """Rigid bodies: velocity changes beyond gravity along each body's trajectory (see events.detect_impulses)."""
+    import numpy as np
+
+    from shorts_engine import events as ev
+
+    objs = sorted(tracked_objects(), key=lambda o: o.name)
+    traj = np.zeros((cfg.frame_count, len(objs), 3))
+    for frame in range(1, cfg.frame_count + 1):
+        scene.frame_set(frame)
+        for j, o in enumerate(objs):
+            traj[frame - 1, j] = o.location
+    p = cfg.params
+    radius = p.get("ball_radius", p.get("ring_minor", 0.15))
+    ref = math.sqrt(2 * cfg.physics.gravity * max(p.get("drop_height", 1.0), 0.5))
+    found = ev.detect_impulses(traj, cfg.fps, cfg.physics.gravity, ref, [radius] * len(objs), 0.0, [o.name for o in objs])
+    return found, {"ref_speed": round(ref, 3), "bodies": len(objs)}
+
+
+EVENT_DETECTORS = {"cloth": cloth_events, "impulse": impulse_events}
 
 
 def main(argv=None) -> None:
@@ -319,8 +384,8 @@ def main(argv=None) -> None:
     if args.mode == "card":
         render_card(cfg, args.card_index)
         return
-    if not 0 <= args.stage < len(cfg.resolutions):
-        raise SystemExit(f"--stage {args.stage} out of range (0..{len(cfg.resolutions) - 1})")
+    if not 0 <= args.stage < cfg.stage_count:
+        raise SystemExit(f"--stage {args.stage} out of range (0..{cfg.stage_count - 1})")
     stage = cfg.stages()[args.stage]
     if args.mode in ("build", "all"):
         build_stage(cfg, stage)

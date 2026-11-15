@@ -144,3 +144,50 @@ def save_events(path: Path, events: list[SimEvent], fps: float, stage: int, extr
 def load_events(path: Path) -> list[SimEvent]:
     data = json.loads(Path(path).read_text())
     return [SimEvent(**e) for e in data["events"]]
+
+
+def detect_impulses(traj, fps: float, gravity: float, ref_speed: float, radii=None, ground_z: float = 0.0,
+                    names=None, threshold: float = 0.12, rearm_frames: int = 3, source: str = "") -> list[SimEvent]:
+    """Collision events for any set of rigid bodies from their trajectories alone (no geometry needed).
+
+    ``traj`` has shape (frames, objects, 3); frame 0 is Blender frame 1. A body that is only falling, rolling or
+    resting changes velocity by at most gravity*dt per frame; anything beyond that is an impulse from a contact
+    (ground, wall, funnel, another body). The excess speed change divided by ``ref_speed`` is the strength.
+    Peaks are taken per body and a body must stay quiet for ``rearm_frames`` before it can trigger again.
+
+    Event type: a hard hit near the floor is a ``bounce`` (soft ones a ``landing``); hits elsewhere are ``collision``.
+    """
+    import numpy as np
+
+    traj = np.asarray(traj, dtype=float)
+    if traj.ndim != 3 or traj.shape[0] < 4 or ref_speed <= 0:
+        return []
+    frames, n, _ = traj.shape
+    radii = np.full(n, 0.2) if radii is None else np.asarray(radii, dtype=float)
+    vel = np.diff(traj, axis=0) * fps                          # vel[k] = velocity over (frame k+1 -> k+2)
+    acc = np.diff(vel, axis=0)                                 # change of velocity per frame step
+    acc[..., 2] += gravity / fps                               # remove the free-fall part (gravity * dt)
+    excess = np.linalg.norm(acc, axis=2)                       # (frames-2, n): impulse speed per body
+    strength = np.clip(excess / ref_speed, 0.0, 1.0)
+    events: list[SimEvent] = []
+    for j in range(n):
+        s = strength[:, j]
+        last = -10 ** 9
+        for k in range(len(s)):
+            if s[k] < threshold:
+                continue
+            lo, hi = max(0, k - 1), min(len(s), k + 2)
+            if s[k] < s[lo:hi].max() or k - last <= rearm_frames:   # local peak only, then re-arm
+                continue
+            last = k
+            frame = k + 2                                      # change observed between frame k+2 and k+3 -> contact near k+2.5
+            z = traj[min(k + 1, frames - 1), j, 2]
+            near_floor = z - radii[j] <= ground_z + 0.08
+            hit_floor = near_floor and vel[k, j, 2] < -0.15          # was moving down into the floor
+            etype = "collision"
+            if hit_floor:
+                etype = "bounce" if s[k] >= 0.3 else "landing"
+            events.append(SimEvent(etype, float(frame) + 0.5, round(float(s[k]), 3),
+                                   source=(names[j] if names is not None else f"body_{j}") if not source else source))
+    events.sort(key=lambda e: e.frame)
+    return events

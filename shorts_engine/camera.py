@@ -33,13 +33,13 @@ def add_camera(scene, cam_cfg, width: int, height: int):
     return cam
 
 
-def apply_camera(cam_cfg) -> None:
+def apply_camera(cam_cfg, target_xy=(0.0, 0.0)) -> None:
     """Position the existing camera. Called at build AND render time so camera edits in the config
     take effect without re-baking (the camera does not affect the physics)."""
     cam = bpy.data.objects["Camera"]
     cam.location = Vector((0.0, -cam_cfg.distance, cam_cfg.height))
     cam.data.lens = cam_cfg.focal_length
-    bpy.data.objects["CameraTarget"].location = Vector((0.0, 0.0, cam_cfg.target_z))
+    bpy.data.objects["CameraTarget"].location = Vector((target_xy[0], target_xy[1], cam_cfg.target_z))
 
 
 def set_label(text: str, size: float, y: float | None = None) -> None:

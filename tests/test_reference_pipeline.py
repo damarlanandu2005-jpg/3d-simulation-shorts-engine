@@ -86,7 +86,9 @@ def test_kaggle_workflow_inputs_match_the_fixed_config_mapping():
     spec = spec_from_file_location("ka", ROOT / "kaggle" / "kaggle_automation.py")
     ka = module_from_spec(spec)
     spec.loader.exec_module(ka)
-    assert inputs["test_config"]["options"] == list(ka.CONFIGS) == ["baseline", "optix", "1080p"]
+    # Phase 9 generalised the workflow: the original three V1.1 tests stay first and unchanged, experiments are added
+    assert inputs["test_config"]["options"] == list(ka.ALL_CONFIGS)
+    assert inputs["test_config"]["options"][:3] == list(ka.CONFIGS) == ["baseline", "optix", "1080p"]
     assert set(inputs["accelerator"]["options"]) == set(ka.ACCELERATORS)
     for path, _ in ka.CONFIGS.values():
         assert (ROOT / path).is_file()
@@ -107,13 +109,16 @@ def test_kernel_result_folder_holds_only_the_required_files(tmp_path):
     spec = spec_from_file_location("ka", ROOT / "kaggle" / "kaggle_automation.py")
     ka = module_from_spec(spec)
     spec.loader.exec_module(ka)
-    assert ka.expected_result_files("baseline") == {"v1_1_a.mp4", "benchmark.json", "run_info.json", "render.log"}
+    # Phase 9 adds the per-video reports (metadata, QC, audio timeline) next to the mp4 + benchmark; still no frames/repo
+    assert ka.expected_result_files("baseline") == {"v1_1_a.mp4", "benchmark.json", "run_info.json", "render.log",
+                                                    "metadata.json", "qc_report.json", "audio_timeline.json"}
     for name in ka.expected_result_files("baseline") | {"repo", "frames.zip"}:
         (tmp_path / name).write_bytes(b"x")
     assert ka.unexpected_files(tmp_path, "baseline") == ["frames.zip", "repo"]
-    # the generated kernel copies exactly the mp4 + benchmark.json into the result folder
+    # the generated kernel copies only the mp4 and the report files (never frames or the repo)
     src = ka.build_kernel_script("baseline", "b9b74223a4ff98d9560dc177288da9efdcdf4504")
-    assert src.count("shutil.copy2(") == 2 and "BUILD = Path(\"/tmp/se_build\")" in src
+    assert "BUILD = Path(\"/tmp/se_build\")" in src and "frames" not in src.split("# 6. Collect outputs")[1]
+    assert 'PER_VIDEO = ("benchmark.json", "metadata.json", "qc_report.json", "audio_timeline.json")' in src
 
 
 # ------------------------------------------------------------------ real end-to-end (Blender + FFmpeg)

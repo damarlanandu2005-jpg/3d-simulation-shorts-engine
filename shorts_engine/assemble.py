@@ -10,12 +10,13 @@ import subprocess
 from pathlib import Path
 
 
-def stage_clip_cmd(frames_dir: Path, fps: int, out: Path, crf: int = 18, ffmpeg: str = "ffmpeg") -> list[str]:
-    """PNG sequence frame_0001.png... -> H.264 mp4."""
+def stage_clip_cmd(frames_dir: Path, fps: int, out: Path, crf: int = 18, ffmpeg: str = "ffmpeg",
+                   start_number: int = 1) -> list[str]:
+    """PNG sequence frame_0001.png... -> H.264 mp4 (``start_number`` for ranges like the closeup hook)."""
     return [
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
         "-framerate", str(fps),
-        "-start_number", "1",
+        "-start_number", str(start_number),
         "-i", str(Path(frames_dir) / "frame_%04d.png"),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", "-an",
@@ -53,12 +54,13 @@ def concat_cmd(list_file: Path, out: Path, ffmpeg: str = "ffmpeg") -> list[str]:
     ]
 
 
-def expected_frames(frames_dir: Path, frame_count: int) -> list[Path]:
-    return [Path(frames_dir) / f"frame_{i:04d}.png" for i in range(1, frame_count + 1)]
+def expected_frames(frames_dir: Path, last: int, first: int = 1) -> list[Path]:
+    return [Path(frames_dir) / f"frame_{i:04d}.png" for i in range(first, last + 1)]
 
 
-def missing_frames(frames_dir: Path, frame_count: int) -> list[int]:
-    return [i for i, p in enumerate(expected_frames(frames_dir, frame_count), start=1) if not p.exists()]
+def missing_frames(frames_dir: Path, last: int, first: int = 1) -> list[int]:
+    """Frame numbers in first..last with no PNG. ffmpeg silently stops at the first gap, so check before encoding."""
+    return [i for i, p in zip(range(first, last + 1), expected_frames(frames_dir, last, first)) if not p.exists()]
 
 
 def run(cmd: list[str]) -> None:

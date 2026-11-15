@@ -34,3 +34,14 @@ def test_missing_frames(tmp_path):
     (tmp_path / "frame_0001.png").write_bytes(b"x")
     (tmp_path / "frame_0003.png").write_bytes(b"x")
     assert assemble.missing_frames(tmp_path, 4) == [2, 4]
+
+
+def test_stage_clip_cmd_start_number():
+    cmd = assemble.stage_clip_cmd(Path("f"), 30, Path("o.mp4"), start_number=31)
+    assert cmd[cmd.index("-start_number") + 1] == "31"
+
+
+def test_missing_frames_with_first(tmp_path):
+    for n in (31, 33):
+        (tmp_path / f"frame_{n:04d}.png").write_bytes(b"x")
+    assert assemble.missing_frames(tmp_path, 34, first=31) == [32, 34]

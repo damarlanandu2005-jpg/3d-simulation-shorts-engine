@@ -1,0 +1,26 @@
+{
+  "name": "v1_1_a",
+  "simulation": "cloth",
+  "seed": 0,
+  "resolutions": [64, 1024, 4096, 16384],
+  "fps": 30,
+  "duration": 3.0,
+  "object": {"type": "sphere", "cloth_size": 4.4, "cloth_drop_height": 1.3},
+  "camera": {"distance": 11.0, "height": 4.8, "target_z": 1.0, "focal_length": 50,
+             "per_stage": [{}, {"distance": 10.4}, {"distance": 9.8}, {"distance": 9.2}]},
+  "render": {"engine": "CYCLES", "samples": 16, "device": "AUTO", "denoise": false},
+  "output": {"width": 720, "height": 1280, "dir": "output"},
+  "label": {"template": "{faces:,} FACES", "size": 0.2},
+  "video": {
+    "hook_seconds": 2.0,
+    "crf": 18,
+    "hook": {
+      "mode": "closeup",
+      "text": "WHAT HAPPENS WHEN\nWE ADD {total_ratio}×\nMORE FACES?",
+      "text_size": 0.09,
+      "text_y": 0.72,
+      "closeup": {"distance_start": 7.0, "distance_end": 5.6, "height": 3.0, "target_z": 1.3, "samples": 32}
+    },
+    "cards": {"enabled": true, "seconds": 0.5, "title": "×{ratio}", "subtitle": "MORE FACES", "samples": 8}
+  }
+}

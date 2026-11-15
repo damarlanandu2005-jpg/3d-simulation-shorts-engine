@@ -54,7 +54,7 @@ output/<name>/
   stage_01_1024/ ...
   hook.mp4  concat.txt
   <name>.mp4          final video
-  benchmark.json      wall time, bake/render seconds, device, peak memory per job
+  benchmark.json      summary (totals, settings actually used, GPU) + per-job wall time, bake/render seconds, memory
 ```
 
 Rendering skips frames that already exist, so an interrupted run can simply be re-run.
@@ -147,6 +147,58 @@ checked by eye on the montage:
 took about 8 s/frame longer here). Revisit it if the final video looks too grainy. Physics, camera,
 materials, object, labels, stage list (64 / 1024 / 4096 / 16384), 4 s stages and 30 fps are unchanged.
 
+## V1.1 video template (branch `v1.1`)
+
+V1.1 changes the *video*, not the physics. Everything below is optional in the config and off by default, so
+`configs/example_cloth.json` still produces exactly the V1 video.
+
+| Feature | Config | What it does |
+| --- | --- | --- |
+| Shorter stages | `duration` | 3 s per stage instead of 4 |
+| Nicer labels | `label.template` | `"{faces:,} FACES"` gives `16,384 FACES` |
+| Multiplier cards | `video.cards` | 0.5 s `x16 / MORE FACES` cards between stages (ratio computed from `resolutions`) |
+| Real hook | `video.hook.mode = "closeup"` | camera push-in over the finished 16K cloth with a question on screen, instead of repeating the last clip |
+| Hook text | `video.hook.text` | placeholders `{total_ratio}` (256), `{first}`, `{last}`; `\n` = line break |
+| Per-stage camera | `camera.per_stage` | list aligned with `resolutions`, e.g. `[{}, {"distance": 10.4}, ...]` |
+| Denoiser choice | `render.denoiser` | `OPENIMAGEDENOISE` (default) or `OPTIX`; OptiX falls back to OIDN, with a warning, if no OptiX GPU is enabled |
+
+Sequence: `hook -> stage 0 -> card -> stage 1 -> card -> stage 2 -> card -> stage 3` (about 15.5 s).
+
+**What needs a re-bake and what doesn't.** Physics, geometry and materials are fixed when a stage is built.
+Render settings (samples, denoise, resolution), the camera and the label text are re-applied at render time, so
+editing them never needs a re-bake. The closeup hook reuses the last stage's baked cache (no extra simulation);
+cards need no bake at all.
+
+Useful commands:
+
+```bash
+python -m shorts_engine.render --config configs/v1_1_a_baseline.json --use-bpy                  # full video
+python -m shorts_engine.render --config configs/v1_1_a_baseline.json --use-bpy --only-extras   # re-render just hook + cards, then assemble
+python -m shorts_engine.render --config configs/v1_1_a_baseline.json --use-bpy --skip-extras   # plain V1 structure (no cards, tail hook)
+```
+
+Before encoding, every clip's frames are checked; a missing frame stops the run with the frame numbers
+(FFmpeg would otherwise silently cut the clip short).
+
+### The three comparison configs
+
+| Config | Output | Samples / denoise | Purpose |
+| --- | --- | --- | --- |
+| `v1_1_a_baseline.json` | 720x1280 | 16, no denoise | new template, same render settings as V1 |
+| `v1_1_b_optix.json` | 720x1280 | 16, OptiX denoise | cost/quality of the GPU denoiser |
+| `v1_1_c_1080p.json` | 1080x1920 | 16, no denoise | cost of full-HD output |
+
+They differ only in those fields, so time, quality and file size are directly comparable. Each writes to
+its own folder (`output/v1_1_a`, `v1_1_b`, `v1_1_c`).
+
+**Known trade-off:** the 64-face sheet is 4.4 units wide, which already fills the frame at the default camera
+distance, so the closer stage cameras clip the sheet's edges for the first ~0.3 s of a stage, until it falls and
+narrows. The V1.1 zoom is therefore gentle (11 -> 10.4 -> 9.8 -> 9.2).
+
+`benchmark.json` is now `{"summary": {...}, "jobs": [...]}`. The summary holds total wall-clock time, time per job
+kind, frames rendered, bake seconds, devices, samples, denoiser and resolution actually used (read back from
+Blender), and the GPU name from `nvidia-smi` when available. GPU utilisation is not measured.
+
 ### Sample-count / denoising sweep
 
 After the benchmark, find the cheapest Cycles settings that still look good:
@@ -170,8 +222,8 @@ production renders.
 
 ```bash
 pip install pytest
-python -m pytest -q            # 37 tests: config, planning, ffmpeg commands (no Blender needed)
-pip install "bpy==4.5.16"      # Python 3.11; enables the 4 real Blender tests
+python -m pytest -q            # 70 tests: config, planning, ffmpeg commands (no Blender needed)
+pip install "bpy==4.5.16"      # Python 3.11; enables the 9 real Blender tests (79 total)
 python -m pytest -q
 ```
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,9 @@ SUPPORTED_OBJECTS = ("sphere", "cube", "cylinder", "torus", "cone")
 SUPPORTED_CLOTH_STYLES = ("wireframe", "solid")
 SUPPORTED_ENGINES = ("CYCLES",)
 SUPPORTED_DEVICES = ("AUTO", "CPU", "GPU")
+SUPPORTED_DENOISERS = ("OPENIMAGEDENOISE", "OPTIX")
+SUPPORTED_HOOK_MODES = ("tail", "closeup", "none")
+_CAMERA_OVERRIDE_KEYS = ("distance", "height", "target_z", "focal_length")
 
 
 class ConfigError(ValueError):
@@ -43,6 +46,9 @@ class CameraCfg:
     height: float = 4.8
     target_z: float = 1.0
     focal_length: float = 50.0
+    # Optional per-stage overrides, aligned with `resolutions`; missing entries use the values above.
+    # e.g. [{}, {"distance": 10}, {"distance": 9.2}, {"distance": 8.6}]
+    per_stage: list = field(default_factory=list)
 
 
 @dataclass
@@ -64,6 +70,9 @@ class RenderCfg:
     max_bounces: int = 4
     denoise: bool = True
     device: str = "AUTO"  # AUTO tries OPTIX -> CUDA -> CPU
+    # Used only when denoise is true. OPTIX needs an OptiX GPU; on any other device the renderer
+    # falls back to OPENIMAGEDENOISE and says so.
+    denoiser: str = "OPENIMAGEDENOISE"
 
 
 @dataclass
@@ -82,9 +91,45 @@ class LabelCfg:
 
 
 @dataclass
+class HookCloseupCfg:
+    """Camera push-in over the finished cloth, rendered from the last stage's baked cache."""
+
+    distance_start: float = 7.0
+    distance_end: float = 5.5
+    height: float = 3.0
+    target_z: float = 1.3
+    samples: int = 0  # 0 = same as render.samples (close-ups of thin wires may want more)
+
+
+@dataclass
+class HookCfg:
+    mode: str = "tail"  # tail = last hook_seconds of the final clip (V1 behaviour) | closeup | none
+    # closeup only; "\n" = line break; placeholders {total_ratio} {first} {last}. Empty = no text.
+    text: str = ""
+    text_size: float = 0.12
+    text_y: float = 0.7  # vertical position of the hook text in the frame (camera units)
+    closeup: HookCloseupCfg = field(default_factory=HookCloseupCfg)
+
+
+@dataclass
+class CardsCfg:
+    """Short title cards between stages showing how much denser the next mesh is."""
+
+    enabled: bool = False
+    seconds: float = 0.5
+    title: str = "\u00d7{ratio}"  # {ratio} = next faces / this faces, e.g. x16
+    subtitle: str = "MORE FACES"
+    title_size: float = 0.9
+    subtitle_size: float = 0.28
+    samples: int = 8
+
+
+@dataclass
 class VideoCfg:
     hook_seconds: float = 2.0
     crf: int = 18
+    hook: HookCfg = field(default_factory=HookCfg)
+    cards: CardsCfg = field(default_factory=CardsCfg)
 
 
 @dataclass
@@ -125,6 +170,58 @@ class Config:
     def final_video_path(self) -> Path:
         return self.root_dir / f"{self.name}.mp4"
 
+    def camera_for_stage(self, index: int) -> CameraCfg:
+        """Base camera merged with this stage's optional override."""
+        override = self.camera.per_stage[index] if index < len(self.camera.per_stage) else {}
+        return replace(self.camera, per_stage=[], **override)
+
+    @property
+    def hook_frames_dir(self) -> Path:
+        return self.root_dir / "hook" / "frames"
+
+    @property
+    def hook_clip_path(self) -> Path:
+        return self.root_dir / "hook.mp4"
+
+    def hook_frame_range(self) -> tuple[int, int]:
+        """Last N frames of the last stage's simulation (used by the closeup hook)."""
+        n = min(self.frame_count, max(1, round(self.video.hook_seconds * self.fps)))
+        return self.frame_count - n + 1, self.frame_count
+
+    def hook_text(self) -> str:
+        """Hook text with {total_ratio}, {first}, {last} filled in from `resolutions`."""
+        first, last = self.resolutions[0], self.resolutions[-1]
+        return self.video.hook.text.format(total_ratio=format_ratio(first, last), first=f"{first:,}", last=f"{last:,}")
+
+    def cards(self) -> list["Card"]:
+        if not self.video.cards.enabled:
+            return []
+        c = self.video.cards
+        out = []
+        for i in range(len(self.resolutions) - 1):
+            ratio = format_ratio(self.resolutions[i], self.resolutions[i + 1])
+            out.append(Card(
+                index=i,
+                ratio=ratio,
+                title=c.title.format(ratio=ratio),
+                subtitle=c.subtitle,
+                frames=max(1, round(c.seconds * self.fps)),
+                frames_dir=self.root_dir / f"card_{i:02d}" / "frames",
+                clip_path=self.root_dir / f"card_{i:02d}" / f"card_{i:02d}.mp4",
+            ))
+        return out
+
+
+@dataclass
+class Card:
+    index: int  # shown after stage `index`
+    ratio: str
+    title: str
+    subtitle: str
+    frames: int
+    frames_dir: Path
+    clip_path: Path
+
 
 @dataclass
 class Stage:
@@ -148,6 +245,11 @@ def faces_to_segments(faces: int) -> int:
             "use e.g. 64, 1024, 4096, 16384)"
         )
     return n
+
+
+def format_ratio(smaller: int, larger: int) -> str:
+    r = larger / smaller
+    return str(int(r)) if r == int(r) else f"{r:.1f}"
 
 
 def short_face_label(faces: int) -> str:
@@ -238,6 +340,10 @@ def validate(cfg: Config) -> Config:
     for name in ("object_color", "cloth_color", "ground_color", "background_color"):
         _check_color(f"material.{name}", getattr(cfg.material, name))
     _check_color("label.color", cfg.label.color)
+    if cfg.render.denoiser not in SUPPORTED_DENOISERS:
+        raise ConfigError(f"render.denoiser must be one of {SUPPORTED_DENOISERS}")
+    _validate_camera(cfg)
+    _validate_video(cfg)
     if cfg.physics.quality < 1:
         raise ConfigError("physics.quality must be >= 1")
     try:
@@ -247,6 +353,56 @@ def validate(cfg: Config) -> Config:
     return cfg
 
 
+def _validate_camera(cfg: Config) -> None:
+    if len(cfg.camera.per_stage) > len(cfg.resolutions):
+        raise ConfigError("camera.per_stage has more entries than resolutions")
+    for i, override in enumerate(cfg.camera.per_stage):
+        if not isinstance(override, dict):
+            raise ConfigError(f"camera.per_stage[{i}] must be an object")
+        bad = set(override) - set(_CAMERA_OVERRIDE_KEYS)
+        if bad:
+            raise ConfigError(f"camera.per_stage[{i}] has unknown key(s) {sorted(bad)}; allowed: {_CAMERA_OVERRIDE_KEYS}")
+        for key, value in override.items():
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ConfigError(f"camera.per_stage[{i}].{key} must be a number")
+            if key in ("distance", "focal_length") and value <= 0:
+                raise ConfigError(f"camera.per_stage[{i}].{key} must be > 0")
+
+
+def _validate_video(cfg: Config) -> None:
+    v = cfg.video
+    if v.hook_seconds < 0:
+        raise ConfigError("video.hook_seconds must be >= 0")
+    if v.hook.mode not in SUPPORTED_HOOK_MODES:
+        raise ConfigError(f"video.hook.mode must be one of {SUPPORTED_HOOK_MODES}")
+    try:
+        v.hook.text.format(total_ratio="256", first="64", last="16,384")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ConfigError(f"video.hook.text is invalid (allowed: {{total_ratio}} {{first}} {{last}}): {exc!r}") from exc
+    if v.hook.mode == "closeup":
+        c = v.hook.closeup
+        if v.hook_seconds <= 0:
+            raise ConfigError("video.hook_seconds must be > 0 for the closeup hook")
+        if c.distance_start <= 0 or c.distance_end <= 0:
+            raise ConfigError("video.hook.closeup distances must be > 0")
+        if c.samples < 0:
+            raise ConfigError("video.hook.closeup.samples must be >= 0")
+    if v.cards.enabled:
+        c = v.cards
+        if len(cfg.resolutions) < 2:
+            raise ConfigError("video.cards needs at least two resolutions")
+        if any(b <= a for a, b in zip(cfg.resolutions, cfg.resolutions[1:])):
+            raise ConfigError("video.cards needs strictly increasing resolutions (the card shows a multiplier)")
+        if not 0 < c.seconds <= 3:
+            raise ConfigError("video.cards.seconds must be > 0 and <= 3")
+        if c.samples < 1:
+            raise ConfigError("video.cards.samples must be >= 1")
+        try:
+            c.title.format(ratio="16")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ConfigError(f"video.cards.title is invalid: {exc!r}") from exc
+
+
 def from_dict(data: dict) -> Config:
     return validate(_build(Config, data, ""))
 
@@ -254,7 +410,7 @@ def from_dict(data: dict) -> Config:
 def load_config(path: str | Path) -> Config:
     path = Path(path)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ConfigError(f"config file not found: {path}") from exc
     except json.JSONDecodeError as exc:

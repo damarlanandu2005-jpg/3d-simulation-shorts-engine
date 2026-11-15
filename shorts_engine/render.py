@@ -37,10 +37,11 @@ GENERATE_PY = Path(__file__).with_name("generate_scene.py")
 @dataclass
 class Job:
     name: str
-    kind: str  # bake | render | clip | hook | concat
+    kind: str  # bake | render | hook_render | card_render | clip | hook | concat
     cmd: list
     stage: int | None = None
     write_text: tuple | None = None  # (path, text) written before running (concat list)
+    check_frames: tuple | None = None  # (frames_dir, first, last) that must all exist before running
 
 
 def find_blender(explicit: str | None = None) -> str | None:
@@ -87,7 +88,15 @@ def plan_jobs(
     do_render: bool = True,
     do_assemble: bool = True,
     ffmpeg: str = "ffmpeg",
+    skip_extras: bool = False,
+    only_extras: bool = False,
 ) -> list[Job]:
+    """Plan bake/render/encode jobs.
+
+    "Extras" are the closeup hook render and the multiplier cards. They are planned only for a full
+    run (all stages, full frame range) or with ``only_extras`` (re-render just those, then assemble).
+    ``skip_extras`` plans the plain V1 structure instead (no cards; a closeup hook becomes the tail hook).
+    """
     all_stages = cfg.stages()
     selected = stages if stages is not None else list(range(len(all_stages)))
     for i in selected:
@@ -98,7 +107,10 @@ def plan_jobs(
     fe = frame_end or cfg.frame_count
     if fe > cfg.frame_count:
         raise ConfigError(f"frame-end {fe} exceeds the {cfg.frame_count} frames per clip")
-    partial = (fs, fe) != (1, cfg.frame_count) or len(selected) != len(all_stages)
+    full_run = stages is None and (fs, fe) == (1, cfg.frame_count)
+    if only_extras:
+        selected = []
+    extras = (full_run or only_extras) and not skip_extras
 
     jobs: list[Job] = []
     for i in selected:
@@ -113,21 +125,54 @@ def plan_jobs(
                                 scene_cmd(runner, use_blender, base + ["--mode", "render",
                                                                        "--frame-start", str(a), "--frame-end", str(b)]), i))
 
-    if do_assemble and not partial:
-        clips = []
+    # skip_extras = plain V1 structure: no cards, and the closeup hook falls back to the tail hook
+    hook_mode = cfg.video.hook.mode
+    if skip_extras and hook_mode == "closeup":
+        hook_mode = "tail"
+    closeup = hook_mode == "closeup"
+    cards = [] if skip_extras else cfg.cards()
+    if extras and do_render:
+        if closeup:
+            last = len(all_stages) - 1
+            jobs.append(Job("render closeup hook", "hook_render",
+                            scene_cmd(runner, use_blender, ["--config", str(config_path), "--stage", str(last), "--mode", "hook"]), last))
+        for card in cards:
+            jobs.append(Job(f"render card {card.index} ({card.title})", "card_render",
+                            scene_cmd(runner, use_blender, ["--config", str(config_path), "--mode", "card",
+                                                            "--card-index", str(card.index)])))
+
+    if do_assemble and (full_run or only_extras):
+        hook_first, hook_last = cfg.hook_frame_range()
         for st in all_stages:
             jobs.append(Job(f"encode clip {st.index}", "clip",
-                            assemble.stage_clip_cmd(st.frames_dir, cfg.fps, st.clip_path, cfg.video.crf, ffmpeg), st.index))
-            clips.append(st.clip_path)
-        hook = cfg.root_dir / "hook.mp4"
-        if cfg.video.hook_seconds > 0:
+                            assemble.stage_clip_cmd(st.frames_dir, cfg.fps, st.clip_path, cfg.video.crf, ffmpeg), st.index,
+                            check_frames=(st.frames_dir, 1, cfg.frame_count)))
+        for card in cards:
+            jobs.append(Job(f"encode card {card.index}", "clip",
+                            assemble.stage_clip_cmd(card.frames_dir, cfg.fps, card.clip_path, cfg.video.crf, ffmpeg),
+                            check_frames=(card.frames_dir, 1, card.frames)))
+
+        sequence: list[Path] = []
+        for st in all_stages:
+            sequence.append(st.clip_path)
+            if st.index < len(cards):
+                sequence.append(cards[st.index].clip_path)
+
+        hook = cfg.hook_clip_path
+        if hook_mode == "closeup":
+            jobs.append(Job("encode closeup hook", "hook",
+                            assemble.stage_clip_cmd(cfg.hook_frames_dir, cfg.fps, hook, cfg.video.crf, ffmpeg, start_number=hook_first),
+                            check_frames=(cfg.hook_frames_dir, hook_first, hook_last)))
+            sequence = [hook] + sequence
+        elif hook_mode == "tail" and cfg.video.hook_seconds > 0:
             jobs.append(Job("encode hook", "hook",
-                            assemble.hook_cmd(clips[-1], cfg.video.hook_seconds, cfg.fps, hook, cfg.video.crf, ffmpeg)))
-            clips = [hook] + clips
+                            assemble.hook_cmd(all_stages[-1].clip_path, cfg.video.hook_seconds, cfg.fps, hook, cfg.video.crf, ffmpeg)))
+            sequence = [hook] + sequence
+
         list_file = cfg.root_dir / "concat.txt"
         jobs.append(Job("concatenate", "concat",
                         assemble.concat_cmd(list_file, cfg.final_video_path(), ffmpeg),
-                        write_text=(list_file, assemble.concat_list_text(clips))))
+                        write_text=(list_file, assemble.concat_list_text(sequence))))
     return jobs
 
 
@@ -150,12 +195,50 @@ def _peak_child_rss_mb() -> float:
     return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024
 
 
+def gpu_name() -> str | None:
+    try:
+        proc = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                              capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout.strip().replace("\n", "; ") if proc.returncode == 0 and proc.stdout.strip() else None
+
+
+def summarize(cfg: Config, results: list[dict], total_wall: float) -> dict:
+    """Production baseline: totals plus the settings that were actually used (read back from Blender)."""
+    renders = [m for r in results for m in r["metrics"] if "render_seconds" in m]
+    bakes = [m for r in results for m in r["metrics"] if "bake_seconds" in m]
+    by_kind: dict = {}
+    for r in results:
+        by_kind[r["kind"]] = round(by_kind.get(r["kind"], 0.0) + r["wall_seconds"], 1)
+    return {
+        "config": cfg.name,
+        "total_wall_seconds": round(total_wall, 1),
+        "wall_seconds_by_job_kind": by_kind,
+        "frames_rendered": sum(m.get("frames_rendered", 0) for m in renders),
+        "frames_skipped": sum(m.get("frames_skipped", 0) for m in renders),
+        "bake_seconds": round(sum(m["bake_seconds"] for m in bakes), 1),
+        "render_devices": sorted({m["device"] for m in renders if m.get("device")}),
+        "samples_used": sorted({m["samples"] for m in renders if m.get("samples")}),
+        "denoiser_used": sorted({str(m.get("denoiser")) for m in renders if "denoiser" in m}),
+        "resolutions_used": sorted({f"{m['width']}x{m['height']}" for m in renders if m.get("width")}),
+        "gpu": gpu_name(),
+        "python": sys.version.split()[0],
+    }
+
+
 def run_jobs(jobs: list[Job], dry_run: bool = False) -> list[dict]:
     results = []
     for job in jobs:
         print(f"\n== {job.name}\n   $ {' '.join(map(str, job.cmd))}", flush=True)
         if dry_run:
             continue
+        if job.check_frames:
+            fdir, first, last = job.check_frames
+            missing = assemble.missing_frames(fdir, last, first)
+            if missing:
+                shown = ", ".join(map(str, missing[:10])) + (" ..." if len(missing) > 10 else "")
+                raise SystemExit(f"cannot run '{job.name}': {len(missing)} frame(s) missing in {fdir}: {shown}")
         if job.write_text:
             path, text = job.write_text
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +272,9 @@ def main(argv=None) -> int:
     p.add_argument("--bake-only", action="store_true")
     p.add_argument("--render-only", action="store_true", help="skip baking (reuse existing .blend + cache)")
     p.add_argument("--no-assemble", action="store_true")
+    p.add_argument("--skip-extras", action="store_true", help="do not render the closeup hook / multiplier cards")
+    p.add_argument("--only-extras", action="store_true",
+                   help="re-render only the closeup hook and cards (stages must already be rendered), then assemble")
     p.add_argument("--dry-run", action="store_true", help="print the commands without running anything")
     args = p.parse_args(argv)
 
@@ -209,17 +295,21 @@ def main(argv=None) -> int:
             frame_start=args.frame_start, frame_end=args.frame_end,
             do_bake=not args.render_only, do_render=not args.bake_only,
             do_assemble=not (args.no_assemble or args.bake_only),
+            skip_extras=args.skip_extras, only_extras=args.only_extras,
         )
     except (ConfigError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    t_start = time.perf_counter()
     results = run_jobs(jobs, dry_run=args.dry_run)
     if not args.dry_run:
         cfg.root_dir.mkdir(parents=True, exist_ok=True)
         bench = cfg.root_dir / "benchmark.json"
-        bench.write_text(json.dumps(results, indent=2))
+        summary = summarize(cfg, results, time.perf_counter() - t_start)
+        bench.write_text(json.dumps({"summary": summary, "jobs": results}, indent=2))
         print(f"\nbenchmark written to {bench}")
+        print(json.dumps(summary, indent=2))
         if cfg.final_video_path().exists():
             print(f"final video: {cfg.final_video_path()}")
     return 0

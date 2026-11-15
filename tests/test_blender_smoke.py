@@ -73,3 +73,67 @@ def test_render_settings_follow_current_config_not_the_saved_blend(cfg_path, tmp
     m = _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "3", "--frame-end", "3")[0]
     assert m["samples"] == 5 and m["denoise"] is False
     assert (m["width"], m["height"]) == (120, 214)
+
+
+# ---------------------------------------------------------------- V1.1
+@pytest.fixture()
+def v11_cfg(tmp_path):
+    cfg = {"name": "v11", "resolutions": [64, 256], "fps": 10, "duration": 1.0,
+           "output": {"width": 90, "height": 160, "dir": str(tmp_path)},
+           "render": {"samples": 2, "device": "CPU"},
+           "video": {"hook_seconds": 0.5,
+                     "hook": {"mode": "closeup", "text": "A {total_ratio}x\nB", "closeup": {"samples": 3}},
+                     "cards": {"enabled": True, "seconds": 0.4, "samples": 2}}}
+    p = tmp_path / "v11.json"
+    p.write_text(json.dumps(cfg))
+    return p
+
+
+def test_closeup_hook_renders_from_baked_cache(v11_cfg, tmp_path):
+    _run(v11_cfg, "--stage", "1", "--mode", "build")
+    m = _run(v11_cfg, "--stage", "1", "--mode", "hook")[0]
+    frames = sorted((tmp_path / "v11" / "hook" / "frames").glob("*.png"))
+    assert [f.name for f in frames] == [f"frame_{n:04d}.png" for n in range(6, 11)]   # last 0.5 s of 10 frames
+    assert m["kind"] == "hook" and m["frames_rendered"] == 5 and m["samples"] == 3  # closeup.samples override
+
+
+def test_hook_without_a_baked_stage_fails_with_a_clear_message(v11_cfg):
+    proc = subprocess.run([sys.executable, str(GEN), "--config", str(v11_cfg), "--stage", "1", "--mode", "hook"],
+                          capture_output=True, text=True, timeout=300)
+    assert proc.returncode != 0 and "build" in (proc.stderr + proc.stdout)
+
+
+def test_card_renders_without_any_bake(v11_cfg, tmp_path):
+    m = _run(v11_cfg, "--mode", "card", "--card-index", "0")[0]
+    frames = sorted((tmp_path / "v11" / "card_00" / "frames").glob("*.png"))
+    assert len(frames) == 4 == m["frames_rendered"]                          # 0.4 s at 10 fps
+    assert m["denoise"] is False and m["samples"] == 2
+
+
+def test_optix_denoiser_falls_back_to_oidn_without_an_optix_gpu(cfg_path, tmp_path):
+    _run(cfg_path, "--stage", "0", "--mode", "build")
+    cfg = json.loads(cfg_path.read_text())
+    cfg["render"].update({"denoise": True, "denoiser": "OPTIX", "device": "CPU"})
+    cfg_path.write_text(json.dumps(cfg))
+    m = _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "2", "--frame-end", "2")[0]
+    assert m["denoise"] is True and m["denoiser"] == "OPENIMAGEDENOISE"
+
+
+def test_camera_and_label_edits_apply_at_render_time(cfg_path, tmp_path):
+    """Changing camera/label in the config must change the image without re-baking."""
+    _run(cfg_path, "--stage", "0", "--mode", "build")
+    frame = tmp_path / "smoke" / "stage_00_64" / "frames" / "frame_0006.png"
+    _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "6", "--frame-end", "6")
+    before = frame.read_bytes()
+    cfg = json.loads(cfg_path.read_text())
+    cfg["camera"] = {"per_stage": [{"distance": 6.0}]}
+    cfg_path.write_text(json.dumps(cfg))
+    frame.unlink()
+    _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "6", "--frame-end", "6")
+    assert frame.read_bytes() != before
+    cfg["label"] = {"template": "CHANGED {faces}"}
+    cfg_path.write_text(json.dumps(cfg))
+    after_camera = frame.read_bytes()
+    frame.unlink()
+    _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "6", "--frame-end", "6")
+    assert frame.read_bytes() != after_camera

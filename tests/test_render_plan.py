@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,87 @@ def test_dry_run_cli(capsys):
 def test_cli_reports_config_errors(tmp_path, capsys):
     rc = render.main(["--config", str(tmp_path / "missing.json"), "--dry-run"])
     assert rc == 2
+
+
+# ---------------------------------------------------------------- V1.1: hook, cards, extras
+A_PATH = str(ROOT / "configs" / "v1_1_a_baseline.json")
+
+
+def _plan_a(**kw):
+    cfg = load_config(A_PATH)
+    return cfg, render.plan_jobs(cfg, A_PATH, ["blender"], True, **kw)
+
+
+def test_v11_full_plan_order():
+    cfg, jobs = _plan_a()
+    kinds = [j.kind for j in jobs]
+    assert kinds == (["bake", "render"] * 4 + ["hook_render"] + ["card_render"] * 3 + ["clip"] * 7 + ["hook", "concat"])
+    hook_job = next(j for j in jobs if j.kind == "hook_render")
+    assert hook_job.cmd[-2:] == ["--mode", "hook"] and hook_job.stage == 3      # last stage's baked cache
+    cards = [j for j in jobs if j.kind == "card_render"]
+    assert [j.cmd[j.cmd.index("--card-index") + 1] for j in cards] == ["0", "1", "2"]
+
+
+def test_v11_concat_order_is_hook_then_stages_interleaved_with_cards():
+    cfg, jobs = _plan_a()
+    text = jobs[-1].write_text[1]
+    names = [Path(line.split("'")[1]).parent.name + "/" + Path(line.split("'")[1]).name for line in text.strip().splitlines()]
+    assert [n.split("/")[1] for n in names] == [
+        "hook.mp4", "stage_00_64.mp4", "card_00.mp4", "stage_01_1024.mp4", "card_01.mp4",
+        "stage_02_4096.mp4", "card_02.mp4", "stage_03_16384.mp4"]
+
+
+def test_closeup_hook_encodes_with_its_own_start_frame_and_checks_frames():
+    cfg, jobs = _plan_a()
+    hook = next(j for j in jobs if j.kind == "hook")
+    assert hook.cmd[hook.cmd.index("-start_number") + 1] == "31"
+    assert hook.check_frames == (cfg.hook_frames_dir, 31, 90)
+    stage_clips = [j for j in jobs if j.kind == "clip" and j.stage is not None]
+    assert all(j.check_frames[1:] == (1, 90) for j in stage_clips)
+
+
+def test_only_extras_rerenders_hook_and_cards_without_touching_stages():
+    cfg, jobs = _plan_a(only_extras=True)
+    kinds = [j.kind for j in jobs]
+    assert "bake" not in kinds and "render" not in kinds
+    assert kinds[:4] == ["hook_render"] + ["card_render"] * 3 and kinds[-1] == "concat"
+
+
+def test_skip_extras_gives_the_plain_v1_structure():
+    cfg, jobs = _plan_a(skip_extras=True)
+    kinds = [j.kind for j in jobs]
+    assert kinds == ["bake", "render"] * 4 + ["clip"] * 4 + ["hook", "concat"]
+    hook = next(j for j in jobs if j.kind == "hook")
+    assert "-sseof" in hook.cmd                                                  # tail hook, no extra render
+
+
+def test_partial_runs_do_not_plan_extras():
+    _, jobs = _plan_a(stages=[0])
+    assert {j.kind for j in jobs} == {"bake", "render"}
+    _, jobs = _plan_a(frame_start=1, frame_end=10)
+    assert not any(j.kind in ("hook_render", "card_render", "concat") for j in jobs)
+
+
+def test_missing_frames_stop_encoding_with_a_clear_message(tmp_path):
+    (tmp_path / "frame_0001.png").write_bytes(b"x")
+    job = render.Job("encode clip", "clip", ["true"], check_frames=(tmp_path, 1, 3))
+    with pytest.raises(SystemExit, match="2 frame"):
+        render.run_jobs([job])
+    (tmp_path / "frame_0002.png").write_bytes(b"x")
+    (tmp_path / "frame_0003.png").write_bytes(b"x")
+    results = render.run_jobs([render.Job("encode clip", "clip", [sys.executable, "-c", "pass"], check_frames=(tmp_path, 1, 3))])
+    assert results[0]["kind"] == "clip"
+
+
+def test_summarize_reports_the_baseline_fields():
+    cfg = load_config(A_PATH)
+    results = [
+        {"job": "bake", "kind": "bake", "wall_seconds": 10.0, "peak_rss_mb_so_far": 1, "metrics": [{"bake_seconds": 9.5}]},
+        {"job": "render", "kind": "render", "wall_seconds": 20.0, "peak_rss_mb_so_far": 1,
+         "metrics": [{"render_seconds": 19.0, "frames_rendered": 90, "frames_skipped": 0, "device": "OPTIX",
+                      "samples": 16, "denoiser": None, "width": 720, "height": 1280}]},
+    ]
+    s = render.summarize(cfg, results, 33.3)
+    assert s["total_wall_seconds"] == 33.3 and s["frames_rendered"] == 90 and s["bake_seconds"] == 9.5
+    assert s["render_devices"] == ["OPTIX"] and s["samples_used"] == [16] and s["resolutions_used"] == ["720x1280"]
+    assert s["wall_seconds_by_job_kind"] == {"bake": 10.0, "render": 20.0}

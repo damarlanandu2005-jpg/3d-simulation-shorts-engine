@@ -29,7 +29,6 @@ jobs:
     timeout-minutes: 240
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       TEST_CONFIG: ${{ inputs.test_config }}
       COMMIT_SHA: ${{ github.sha }}
       RUN_ID: ${{ github.run_id }}
@@ -50,10 +49,19 @@ jobs:
       - name: Unit tests for the automation helper
         run: python -m pytest -q tests/test_kaggle_automation.py
 
+      - name: Select Kaggle auth method (new KGAT_ token or legacy 32-hex key; value never printed)
+        env:
+          RAW_KAGGLE_SECRET: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          if [ -z "$RAW_KAGGLE_SECRET" ]; then echo "::error::KAGGLE_API_TOKEN secret missing"; exit 1; fi
+          case "$RAW_KAGGLE_SECRET" in
+            KGAT_*) echo "KAGGLE_API_TOKEN=$RAW_KAGGLE_SECRET" >> "$GITHUB_ENV"; echo "auth method: access token (KGAT_)" ;;
+            *)      echo "KAGGLE_KEY=$RAW_KAGGLE_SECRET" >> "$GITHUB_ENV"; echo "auth method: legacy username+key" ;;
+          esac
+
       - name: Fail early if secrets or auth are bad
         run: |
           [ -n "$KAGGLE_USERNAME" ] || { echo "::error::KAGGLE_USERNAME secret missing"; exit 1; }
-          [ -n "$KAGGLE_API_TOKEN" ] || { echo "::error::KAGGLE_API_TOKEN secret missing"; exit 1; }
           kaggle datasets list --page-size 1 > /dev/null || { echo "::error::Kaggle auth failed"; exit 1; }
           echo "Kaggle auth OK"
 

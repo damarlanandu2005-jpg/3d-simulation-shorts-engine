@@ -246,3 +246,20 @@ tests/
 ## Licenses
 
 See `LICENSES.md`. No third-party code is copied. Add your own `LICENSE` file before sharing the repo.
+
+## GitHub -> Kaggle GPU test automation (experimental, V1.1 tests)
+
+Two manual workflows (Actions tab > Run workflow, branch `v1.1`). Needs repo secrets
+`KAGGLE_USERNAME` and `KAGGLE_API_TOKEN` (never committed, never printed).
+
+1. **kaggle-auth-check** - authenticates and makes harmless API calls. No GPU.
+2. **kaggle-gpu-test** - input `test_config`: `baseline` (`configs/v1_1_a_baseline.json`),
+   `optix` (`v1_1_b_optix.json`) or `1080p` (`v1_1_c_1080p.json`). It pushes a private Kaggle GPU
+   script kernel that clones the exact commit, runs `kaggle/setup_kaggle.sh`, checks `import bpy`,
+   runs `python -m shorts_engine.render --config <cfg> --use-bpy`, and returns the `.mp4`,
+   `benchmark.json` and `run_info.json`. The workflow downloads them into the artifact
+   `kaggle-<test_config>-<run_id>`. Any failure (auth, no GPU, setup, render, missing outputs) fails the run.
+
+Helper: `kaggle/kaggle_automation.py` (tests in `tests/test_kaggle_automation.py`). The manual
+notebook flow (`!bash kaggle/setup_kaggle.sh` + render command) is unchanged. The kernel clones the
+public repo, so the commit must be pushed to GitHub before running.

@@ -84,6 +84,17 @@ def _vector(t: ExperimentTemplate, params: dict, stage_idx: int, shape: str) -> 
     return vec
 
 
+def vector_of(experiment: str, params: dict, stage_values: list, shape: str) -> dict:
+    """Normalised coordinates of an existing configuration (params = resolved experiment parameters)."""
+    t = get_template(experiment)
+    stage_idx = 0
+    if list(stage_values) != list(t.default_stage_values) and t.stage_variations:
+        alt = [list(x) for x in t.stage_variations]
+        stage_idx = alt.index(list(stage_values)) + 1 if list(stage_values) in alt else len(alt) + 1
+    full = {n: params.get(n, t.params[n].default) for n in t.variations}
+    return _vector(t, full, stage_idx, shape)
+
+
 def distance(a: dict, b: dict) -> float:
     """Mean normalised difference over the physical dimensions (stage progression / shape count as 0 or 1)."""
     keys = set(a) | set(b)
@@ -105,8 +116,13 @@ def _meaningful(t: ExperimentTemplate, changed: dict, stage_idx: int, shape: str
 
 
 def generate_variations(experiment: str, count: int, master_seed: int = 0, preset: str = "720p",
-                        base: dict | None = None, min_distance: float = 0.12) -> list[Variation]:
-    """``count`` distinct, validated variations of ``experiment`` (deterministic for a given master seed)."""
+                        base: dict | None = None, min_distance: float = 0.12, avoid: list | None = None,
+                        first_index: int = 0) -> list[Variation]:
+    """``count`` distinct, validated variations of ``experiment`` (deterministic for a given master seed).
+
+    ``avoid`` is a list of vectors (see ``vector_of``) of videos that already exist: new variations keep a minimum
+    distance from them too (content diversity across batches). ``first_index`` continues numbering of a batch.
+    """
     t = get_template(experiment)
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         raise ConfigError(f"variations must be an integer >= 1, got {count!r}")
@@ -114,7 +130,7 @@ def generate_variations(experiment: str, count: int, master_seed: int = 0, prese
         raise ConfigError(f"experiment {experiment!r} defines no variation ranges")
     base = copy.deepcopy(base) if base is not None else production_base(preset)
     out: list[Variation] = []
-    for index in range(count):
+    for index in range(first_index, first_index + count):
         seed = derive_seed(master_seed, index)
         rng = random.Random(seed)
         threshold = min_distance
@@ -135,7 +151,7 @@ def generate_variations(experiment: str, count: int, master_seed: int = 0, prese
             params = {n: t.params[n].default for n in t.variations}
             params.update(changed)
             vec = _vector(t, params, stage_idx, shape)
-            if all(distance(vec, o.vector) >= threshold for o in out):
+            if all(distance(vec, o.vector) >= threshold for o in [*out, *[Variation('', 0, 0, '', {}, {}, [], '', v) for v in (avoid or [])]]):
                 accepted = (changed, stage_values, shape, vec)
                 break
         if accepted is None:

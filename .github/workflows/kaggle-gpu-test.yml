@@ -137,6 +137,8 @@ jobs:
 
       - name: Inspect final video streams (audio present? durations)
         run: |
+          set -eo pipefail
+          sudo apt-get install -y -qq ffmpeg > /dev/null
           mp4=$(ls "$RESULT_DIR"/*.mp4 | head -1)
           echo "video file: $mp4"
           ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,duration -of compact "$mp4" | tee -a "$GITHUB_STEP_SUMMARY"

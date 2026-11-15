@@ -30,16 +30,30 @@ jobs:
           [ -n "$KAGGLE_USERNAME" ] && echo "KAGGLE_USERNAME present: true" || { echo "KAGGLE_USERNAME present: false"; exit 1; }
           [ -n "$KAGGLE_API_TOKEN" ] && echo "KAGGLE_API_TOKEN present: true" || { echo "KAGGLE_API_TOKEN present: false"; exit 1; }
 
+      - name: Token shape (diagnostic; never prints the value)
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          t = os.environ["KAGGLE_API_TOKEN"]
+          print("length:", len(t))
+          print("starts with KGAT_:", t.startswith("KGAT_"))
+          print("has whitespace/newline:", t != t.strip() or any(c.isspace() for c in t))
+          print("looks like 32-hex legacy key:", len(t) == 32 and all(c in "0123456789abcdef" for c in t.lower()))
+          print("looks like JSON (kaggle.json pasted):", t.lstrip().startswith("{"))
+          PY
+
       - name: Authenticated API call (kaggle datasets list)
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          set -o pipefail
-          if kaggle datasets list --page-size 1 > /dev/null; then
+          if out=$(kaggle datasets list --page-size 1 2>&1); then
             echo "Kaggle authentication OK: API call succeeded"
           else
-            echo "::error::Kaggle authentication FAILED (check the KAGGLE_API_TOKEN secret)"
+            echo "Kaggle said:"; echo "$out" | head -15
+            echo "::error::Kaggle authentication FAILED"
             exit 1
           fi
 

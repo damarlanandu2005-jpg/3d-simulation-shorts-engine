@@ -443,3 +443,9 @@ Two manual workflows (Actions tab > Run workflow, branch `v1.1`). Needs repo sec
 Helper: `kaggle/kaggle_automation.py` (tests in `tests/test_kaggle_automation.py`). The manual
 notebook flow (`!bash kaggle/setup_kaggle.sh` + render command) is unchanged. The kernel clones the
 public repo, so the commit must be pushed to GitHub before running.
+
+## Verified Kaggle batch (T4 x2, 720p, seed 31)
+
+GitHub Actions run 43764859046 (artifact `kaggle-baseline-43764859046`): 6 videos rendered, all passed QC (h264 + aac, 720x1280, 14-17 s), 4110 s wall time, 54.9 MB total.
+cloth_drape, multiple_balls, ball_funnel (x2), ring_toss, cloth_objects. Per-video times were 585-812 s.
+Invalid parameter combinations are rejected at config load; a failed video is retried once with a safe (cheaper, static-camera) configuration and both attempts are recorded in `manifest.json`.

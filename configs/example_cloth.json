@@ -10,7 +10,7 @@
               "bending": 0.5, "air_damping": 1.0, "quality": 7, "self_collision": true},
   "camera": {"distance": 11.0, "height": 4.8, "target_z": 1.0, "focal_length": 50},
   "material": {"object_color": [0.05, 0.55, 0.1, 1.0], "cloth_style": "wireframe"},
-  "render": {"engine": "CYCLES", "samples": 32, "device": "AUTO", "denoise": true},
+  "render": {"engine": "CYCLES", "samples": 16, "device": "AUTO", "denoise": false},
   "output": {"width": 720, "height": 1280, "dir": "output"},
   "label": {"template": "{faces_short} FACE", "size": 0.2},
   "video": {"hook_seconds": 2.0, "crf": 18}

@@ -83,3 +83,11 @@ def test_output_paths_are_namespaced_per_stage(tmp_path):
     assert st.blend_path.parent == tmp_path / "x" / "stage_00_64"
     assert st.frames_dir.name == "frames"
     assert cfg.final_video_path() == tmp_path / "x" / "x.mp4"
+
+
+def test_example_config_uses_kaggle_sweep_render_settings():
+    """First Kaggle production test: 16 samples, denoising OFF (chosen from the Kaggle quality sweep)."""
+    cfg = load_config(ROOT / "configs" / "example_cloth.json")
+    assert (cfg.render.engine, cfg.render.samples, cfg.render.denoise, cfg.render.device) == ("CYCLES", 16, False, "AUTO")
+    assert (cfg.output.width, cfg.output.height, cfg.fps, cfg.duration) == (720, 1280, 30, 4.0)
+    assert cfg.resolutions == [64, 1024, 4096, 16384]

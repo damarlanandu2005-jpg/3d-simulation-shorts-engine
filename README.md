@@ -129,6 +129,24 @@ Run locally the script was only tested on a CPU-only machine (it correctly repor
 `setup_kaggle.sh` and everything GPU-related are untested. Never commit credentials; if you later
 automate Kaggle from GitHub Actions, keep the token in a GitHub Secret (e.g. `KAGGLE_API_TOKEN`).
 
+### Settings for the first Kaggle production test
+
+`configs/example_cloth.json` uses **16 samples with denoising OFF** (Cycles, device AUTO). This choice is
+based on the Kaggle quality sweep (16384 faces, 720x1280, OptiX), as reported by the project owner and
+checked by eye on the montage:
+
+| Variant | s/frame | SSIM vs reference |
+| --- | --- | --- |
+| 32 samples + denoise | 10.59 | 0.986 |
+| 16 samples + denoise | 10.47 | 0.980 |
+| 32 samples raw | 2.00 | 0.934 |
+| **16 samples raw (chosen)** | **1.89** | **0.871** |
+| 8 samples raw | 1.82 | 0.755 |
+
+16 raw is a speed-first choice with visibly more noise than the denoised variants (the denoised runs
+took about 8 s/frame longer here). Revisit it if the final video looks too grainy. Physics, camera,
+materials, object, labels, stage list (64 / 1024 / 4096 / 16384), 4 s stages and 30 fps are unchanged.
+
 ### Sample-count / denoising sweep
 
 After the benchmark, find the cheapest Cycles settings that still look good:

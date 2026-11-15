@@ -1,0 +1,45 @@
+{
+  "schema_version": 2,
+  "name": "v1_1_a",
+  "seed": 0,
+
+  "experiment": {
+    "type": "cloth_drape",
+    "object": "sphere",
+    "params": {"cloth_size": 4.4, "drop_height": 1.3}
+  },
+
+  "simulation": {"fps": 30, "duration": 3.0},
+
+  "stages": [
+    {"params": {"faces": 64}},
+    {"params": {"faces": 1024},  "camera": {"distance": 10.4}},
+    {"params": {"faces": 4096},  "camera": {"distance": 9.8}},
+    {"params": {"faces": 16384}, "camera": {"distance": 9.2}}
+  ],
+
+  "camera": {"distance": 11.0, "height": 4.8, "target_z": 1.0, "focal_length": 50},
+  "render": {"engine": "CYCLES", "samples": 16, "device": "AUTO", "denoise": false},
+  "output": {"width": 720, "height": 1280, "dir": "output"},
+  "label": {"template": "{faces:,} FACES", "size": 0.2},
+
+  "hook": {
+    "mode": "closeup",
+    "seconds": 2.0,
+    "text": "WHAT HAPPENS WHEN\nWE ADD {total_ratio}×\nMORE FACES?",
+    "text_size": 0.09,
+    "text_y": 0.72,
+    "closeup": {"distance_start": 7.0, "distance_end": 5.6, "height": 3.0, "target_z": 1.3, "samples": 32}
+  },
+
+  "video": {
+    "crf": 18,
+    "cards": {"enabled": false, "seconds": 0.5, "title": "×{ratio}", "subtitle": "MORE FACES", "samples": 8}
+  },
+
+  "audio": {
+    "enabled": true,
+    "music": "assets/audio/music/default_music.wav", "volume_db": -18, "fade_in": 0.5, "fade_out": 1.0,
+    "sfx_enabled": true, "sfx_volume_db": -8, "sfx_min_strength": 0.15, "sfx_min_gap": 0.15
+  }
+}

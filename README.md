@@ -247,6 +247,32 @@ tests/
 
 See `LICENSES.md`. No third-party code is copied. Add your own `LICENSE` file before sharing the repo.
 
+## Experiment configuration (schema v2)
+
+Configs can be written in a general, experiment-oriented format (the old flat format keeps working). Both resolve to
+the same internal `Config`; the V1.1 reference in the new format is `configs/experiments/cloth_drape_reference.json`
+and is tested to be identical to `configs/v1_1_a_baseline.json` (same name on purpose, so do not render both into one output dir).
+
+```json
+{
+  "schema_version": 2, "name": "...", "seed": 0,
+  "experiment": {"type": "cloth_drape", "object": "sphere", "params": {"cloth_size": 4.4, "drop_height": 1.3}},
+  "simulation": {"fps": 30, "duration": 3.0, "physics": {"gravity": 9.81}},
+  "stages": [{"params": {"faces": 64}}, {"params": {"faces": 1024}, "camera": {"distance": 10.4}}],
+  "camera": {...}, "render": {...}, "output": {...}, "label": {...}, "hook": {...}, "video": {...}, "audio": {...}
+}
+```
+
+* `experiment.type` selects the experiment; only `cloth_drape` exists (roadmap names such as `multiple_balls` are rejected
+  with a clear "not implemented yet" error until their Blender simulation is built and tested).
+* `stages` is generic: each stage has experiment-specific `params` (for `cloth_drape`: `faces`, the mesh resolution) and an
+  optional `camera` override. `hook` is top-level (`hook.seconds` replaces `video.hook_seconds`).
+* Strict validation with path-qualified errors: unknown keys, experiment type/object, stage definitions, physics ranges
+  (gravity, mass, stiffness...), fps/duration, render/output settings.
+* Tools: `python -m shorts_engine.experiment list | describe CONFIG | migrate CONFIG` (`migrate` prints any config in the new format).
+* Code: `shorts_engine/experiment.py` (schema, registry, translator). `Config.experiment_type` is derived, so the
+  serialised config, and therefore the golden snapshots, are unchanged.
+
 ## Reference pipeline (frozen)
 
 `configs/v1_1_a_baseline.json` (cloth draping over a sphere, 720x1280, 16 samples, no denoise, closeup hook,

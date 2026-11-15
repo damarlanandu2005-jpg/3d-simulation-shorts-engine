@@ -157,3 +157,24 @@ def test_events_mode_detects_the_cloth_hitting_the_sphere(tmp_path):
     assert first["strength"] > 0.4
     assert [e["frame"] for e in data["events"]] == sorted(e["frame"] for e in data["events"])
     assert len(data["events"]) <= 6                     # a handful of events, not one per frame
+
+
+def test_new_format_config_drives_real_blender_identically_to_the_legacy_format(tmp_path):
+    """Phase 2: the experiment-format config must produce the same simulation events as the flat format."""
+    from shorts_engine.experiment import to_experiment_dict
+    from shorts_engine.config import from_dict
+
+    flat = {"name": "compat", "fps": 24, "duration": 2, "resolutions": [64],
+            "output": {"dir": str(tmp_path / "flat"), "width": 64, "height": 128},
+            "camera": {"per_stage": []}, "video": {"hook": {"mode": "none"}},
+            "audio": {"enabled": True, "sfx_enabled": True}}
+    new = to_experiment_dict(from_dict(flat))
+    new["output"]["dir"] = str(tmp_path / "new")
+    events = {}
+    for label, data in (("flat", flat), ("new", new)):
+        path = tmp_path / f"{label}.json"
+        path.write_text(json.dumps(data))
+        _run(path, "--stage", "0", "--mode", "build")
+        _run(path, "--stage", "0", "--mode", "events")
+        events[label] = json.loads(next((tmp_path / label).rglob("events.json")).read_text())["events"]
+    assert events["flat"] and events["flat"] == events["new"]     # identical physics -> identical contact events

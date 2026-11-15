@@ -130,7 +130,8 @@ def _probe(path):
 
 
 @needs_real
-def test_reference_pipeline_end_to_end_on_a_tiny_scene(tmp_path):
+@pytest.mark.parametrize("fmt", ["flat", "experiment"])
+def test_reference_pipeline_end_to_end_on_a_tiny_scene(tmp_path, fmt):
     """Same structure as production (closeup hook, labelled stages, no cards, music + physics SFX), just small."""
     data = json.loads(REFERENCE.read_text())
     data.update(name="reference_tiny", fps=24, duration=2.0, resolutions=[64, 256])
@@ -139,6 +140,9 @@ def test_reference_pipeline_end_to_end_on_a_tiny_scene(tmp_path):
     data["video"]["hook_seconds"] = 1.0
     data["video"]["hook"]["closeup"]["samples"] = 2
     data["camera"]["per_stage"] = data["camera"]["per_stage"][:2]
+    if fmt == "experiment":          # the same scene written in the Phase 2 experiment format
+        from shorts_engine.experiment import to_experiment_dict
+        data = to_experiment_dict(from_dict(data))
     cfg_path = tmp_path / "reference_tiny.json"
     cfg_path.write_text(json.dumps(data))
 

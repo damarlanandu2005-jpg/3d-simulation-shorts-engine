@@ -193,6 +193,12 @@ class Config:
     def final_video_path(self) -> Path:
         return self.root_dir / f"{self.name}.mp4"
 
+    @property
+    def experiment_type(self) -> str:
+        """Experiment type implied by ``simulation`` (derived, so it is not part of the serialised config)."""
+        from .experiment import EXPERIMENT_FOR_SIMULATION
+        return EXPERIMENT_FOR_SIMULATION[self.simulation]
+
     def silent_video_path(self) -> Path:
         """Video before the music is mixed in (only produced when audio is enabled)."""
         return self.root_dir / f"{self.name}_silent.mp4"
@@ -394,13 +400,38 @@ def validate(cfg: Config) -> Config:
         raise ConfigError(f"render.denoiser must be one of {SUPPORTED_DENOISERS}")
     _validate_camera(cfg)
     _validate_video(cfg)
-    if cfg.physics.quality < 1:
-        raise ConfigError("physics.quality must be >= 1")
+    _validate_simulation(cfg)
     try:
         format_label(cfg.label.template, 64)
     except (KeyError, IndexError, ValueError) as exc:
         raise ConfigError(f"label.template is invalid: {exc!r}") from exc
     return cfg
+
+
+def _positive(name: str, value: Any, upper: float | None = None) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0 or (upper is not None and value > upper):
+        raise ConfigError(f"{name} must be a number > 0" + (f" and <= {upper}" if upper is not None else "") + f", got {value!r}")
+
+
+def _validate_simulation(cfg: Config) -> None:
+    ph = cfg.physics
+    _positive("physics.gravity", ph.gravity, 100)
+    _positive("physics.mass", ph.mass)
+    for name in ("tension", "compression", "shear"):
+        _positive(f"physics.{name}", getattr(ph, name))
+    for name in ("bending", "air_damping"):
+        value = getattr(ph, name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ConfigError(f"physics.{name} must be a number >= 0, got {value!r}")
+    if not isinstance(ph.quality, int) or isinstance(ph.quality, bool) or ph.quality < 1:
+        raise ConfigError("physics.quality must be an integer >= 1")
+    _positive("physics.collision_distance", ph.collision_distance, 1)
+    _positive("object.cloth_size", cfg.object.cloth_size)
+    _positive("object.cloth_drop_height", cfg.object.cloth_drop_height)
+    if not isinstance(cfg.seed, int) or isinstance(cfg.seed, bool) or cfg.seed < 0:
+        raise ConfigError("seed must be an integer >= 0")
+    if cfg.render.max_bounces < 0:
+        raise ConfigError("render.max_bounces must be >= 0")
 
 
 def _validate_camera(cfg: Config) -> None:
@@ -470,6 +501,10 @@ def _validate_video(cfg: Config) -> None:
 
 
 def from_dict(data: dict) -> Config:
+    """Build a validated Config from either the flat (V1/V1.1) format or the experiment format (see experiment.py)."""
+    if isinstance(data, dict) and ("experiment" in data or "schema_version" in data):
+        from .experiment import experiment_to_legacy  # lazy: experiment.py imports this module
+        data = experiment_to_legacy(data)
     return validate(_build(Config, data, ""))
 
 

@@ -168,6 +168,9 @@ try:
         fail(f"missing benchmark.json: {bench}")
     shutil.copy2(mp4, RESULT / mp4.name)
     shutil.copy2(bench, RESULT / "benchmark.json")
+    pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,duration",
+                         "-of", "compact", str(mp4)], capture_output=True, text=True)
+    info["streams"] = pr.stdout.strip().splitlines()
     info["status"] = "ok"
     info["video_bytes"] = mp4.stat().st_size
     save_info()

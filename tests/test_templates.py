@@ -53,7 +53,8 @@ def test_labels_and_hooks_describe_the_experiment(exp):
 def test_balls_labels_and_dynamic_hook():
     cfg = from_dict(doc("multiple_balls", hook={"text": "WHAT HAPPENS WHEN WE DROP {last} BALLS?", "mode": "closeup", "seconds": 2}))
     assert [s.label for s in cfg.stages()] == ["1 BALL", "10 BALLS", "50 BALLS", "100 BALLS"]
-    assert cfg.hook_text() == "WHAT HAPPENS WHEN WE DROP 100 BALLS?"
+    assert cfg.hook_text().replace("\n", " ") == "WHAT HAPPENS WHEN WE DROP 100 BALLS?"
+    assert max(len(line) for line in cfg.hook_text().split("\n")) <= 16, "long questions wrap to fit the frame"
 
 
 def test_hook_depends_on_the_actual_experiment_numbers():
@@ -233,7 +234,7 @@ def test_fitted_camera_keeps_the_region_in_frame(exp, preset):
     t = get_template(exp)
     for v in t.default_stage_values:
         r = t.frame_region(t.resolve_params({}), v)
-        cam = camera_rig.fit_camera(r.half_width, r.top, r.bottom, preset)
+        cam = camera_rig.fit_camera(r.half_width, r.top, r.bottom, preset, elevation=t.camera_defaults.get('elevation'))
         tan_v = 18.0 / 50.0
         tan_h = tan_v * 9 / 16
         c = np.array([0, -cam["distance"], cam["height"]]); target = np.array([0, 0, cam["target_z"]])

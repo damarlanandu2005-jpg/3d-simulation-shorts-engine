@@ -291,7 +291,7 @@ register(ExperimentTemplate(
     label="HOLE {hole_ratio}× BALL", label_values=_funnel_label,
     hooks=("HOW SMALL CAN THE HOLE GET?", "WILL {balls} BALLS FIT THROUGH A {hole_ratio_last}× HOLE?",
            "WHEN DOES THE FLOW JAM?"),
-    frame_region=_funnel_region,
+    frame_region=_funnel_region, camera_defaults={"elevation": 40.0},
     variations={"balls": (24, 70), "restitution": (0.05, 0.6), "friction": (0.1, 0.9), "ball_radius": (0.12, 0.24),
                 "funnel_height": (1.3, 2.2)},
     stage_variations=((0.9, 0.6, 0.42, 0.3), (1.0, 0.7, 0.5, 0.36), (0.8, 0.55, 0.4, 0.28, 0.22)),

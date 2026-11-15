@@ -366,7 +366,11 @@ class ExperimentConfig(Config):
         text = self.video.hook.text
         if text == "auto":
             text = t.hooks[self.seed % len(t.hooks)]
-        return text.format(**vals)
+        text = text.format(**vals)
+        if "\n" not in text:                                   # fit the 9:16 frame: wrap long questions onto lines
+            import textwrap
+            text = "\n".join(textwrap.wrap(text, 16))
+        return text
 
     def camera_for_stage(self, index: int) -> CameraCfg:
         override = self.camera.per_stage[index] if index < len(self.camera.per_stage) else {}
@@ -375,7 +379,8 @@ class ExperimentConfig(Config):
         from .camera_rig import fit_camera
         t = self.template
         region = t.frame_region(self.params, self.stage_values[index])
-        fit = fit_camera(region.half_width, region.top, region.bottom, self.camera_preset, self.camera.focal_length)
+        fit = fit_camera(region.half_width, region.top, region.bottom, self.camera_preset, self.camera.focal_length,
+                         elevation=t.camera_defaults.get("elevation"))
         return replace(self.camera, per_stage=[], **{**fit, **override})
 
 

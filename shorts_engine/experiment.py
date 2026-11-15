@@ -211,7 +211,8 @@ def experiment_to_legacy(data: dict) -> dict:
         if not hook_closeup:
             last = t.frame_region(resolved, values[-1])
             from .camera_rig import fit_camera
-            fit = fit_camera(last.half_width, last.top, last.bottom, "close", out.get("camera", {}).get("focal_length", 50.0))
+            fit = fit_camera(last.half_width, last.top, last.bottom, "close", out.get("camera", {}).get("focal_length", 50.0),
+                             elevation=t.camera_defaults.get("elevation"))
             hook_closeup.update(distance_start=round(fit["distance"] * 1.25, 3), distance_end=fit["distance"],
                                 height=fit["height"], target_z=fit["target_z"])
     return out

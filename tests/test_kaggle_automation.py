@@ -135,3 +135,141 @@ def test_kernel_keeps_work_dir_small():
     src = ka.build_kernel_script("baseline", SHA)
     assert 'repo = BUILD / "repo"' in src and "/tmp/se_build" in src
     assert 'WORK / "repo"' not in src
+
+
+# ---------------------------------------------------------------- Phase 9: generalized selection
+def test_original_three_configs_are_untouched_and_experiments_are_added():
+    assert set(ka.CONFIGS) == {"baseline", "optix", "1080p"}
+    assert set(ka.ALL_CONFIGS) == set(ka.CONFIGS) | {"multiple_balls", "ball_funnel", "ring_toss", "cloth_objects"}
+
+
+@pytest.mark.parametrize("key", list(ka.EXPERIMENT_CONFIGS))
+def test_experiment_keys_map_to_real_valid_configs(key):
+    path, name = ka.EXPERIMENT_CONFIGS[key]
+    assert ka.resolve_config_path(path) == (path, name)
+    assert json.loads((ROOT / path).read_text())["name"] == name
+
+
+@pytest.mark.parametrize("bad", [
+    "../etc/passwd", "/etc/passwd", "configs/../secrets.json", "configs//x.json", "configs/x.txt", "other/x.json",
+    "configs/x.json; rm -rf /", "configs/$(id).json", "configs/missing.json", "", "configs/", "configs/ x.json",
+    "configs/experiments/../../kaggle/kaggle_automation.py"])
+def test_config_path_validation_rejects_everything_unsafe(bad):
+    with pytest.raises(ka.AutomationError):
+        ka.resolve_config_path(bad)
+
+
+def test_config_path_must_load_as_a_valid_config(tmp_path):
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "broken.json").write_text("{nope")
+    (tmp_path / "configs" / "noname.json").write_text("{}")
+    (tmp_path / "configs" / "invalid.json").write_text(json.dumps({"name": "ok", "resolutions": [7]}))
+    (tmp_path / "configs" / "badname.json").write_text(json.dumps({"name": "a b"}))
+    for f, msg in (("broken", "JSON"), ("noname", "name"), ("invalid", "invalid"), ("badname", "name")):
+        with pytest.raises(ka.AutomationError, match=msg):
+            ka.resolve_config_path(f"configs/{f}.json", root=tmp_path)
+
+
+def test_config_path_symlink_escape_is_rejected(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"name": "evil"}))
+    root = tmp_path / "repo"; (root / "configs").mkdir(parents=True)
+    (root / "configs" / "link.json").symlink_to(outside)
+    with pytest.raises(ka.AutomationError, match="does not exist"):
+        ka.resolve_config_path("configs/link.json", root=root)
+
+
+@pytest.mark.parametrize("args,ok", [
+    (("auto", 4, 7, "720p"), True), (("multiple_balls", "12", "999999", "1080p"), True),
+    (("teleporter", 4, 7, "720p"), False), (("auto", 0, 7, "720p"), False), (("auto", 13, 7, "720p"), False),
+    (("auto", 4, -1, "720p"), False), (("auto", 4, 10 ** 7, "720p"), False), (("auto", 4, 7, "4k"), False),
+    (("auto; id", 4, 7, "720p"), False), (("auto", "x", 7, "720p"), False)])
+def test_batch_validation(args, ok):
+    if ok:
+        assert ka.validate_batch(*args)["variations"] == int(args[1])
+    else:
+        with pytest.raises(ka.AutomationError):
+            ka.validate_batch(*args)
+
+
+def test_batch_kernel_script_runs_the_batch_command_and_carries_no_secrets():
+    batch = ka.validate_batch("ring_toss", 3, 5, "720p")
+    src = ka.build_kernel_script("baseline", SHA, batch=batch)
+    ast.parse(src)
+    assert "shorts_engine.batch" in src and '"ring_toss"' in src and "--use-bpy" in src and "--run" in src
+    for word in ("KAGGLE_API_TOKEN", "KAGGLE_KEY", "KGAT_"):
+        assert word not in src
+
+
+def test_single_kernel_script_has_no_batch():
+    src = ka.build_kernel_script("ring_toss", SHA)
+    ast.parse(src)
+    assert "\nBATCH = None" in src and json.dumps("configs/experiments/ring_toss_smaller.json") in src
+
+
+def test_prepare_custom_config_batch_and_job_file(tmp_path):
+    k = ka.prepare("baseline", SHA, "u", "9", tmp_path / "j1", config_path="configs/experiments/ball_funnel_hole.json",
+                   job_file=tmp_path / "job1.json")
+    assert k.startswith("u/se-v11-custom-")
+    job = json.loads((tmp_path / "job1.json").read_text())
+    assert job == {"mode": "single", "key": "custom", "output_name": "ball_funnel_hole", "batch": None}
+    ka.prepare("baseline", SHA, "u", "9", tmp_path / "j2", batch=ka.validate_batch("auto", 2, 1, "720p"), job_file=tmp_path / "job2.json")
+    assert json.loads((tmp_path / "job2.json").read_text())["mode"] == "batch"
+    assert not (tmp_path / "j2" / "job.json").exists(), "job info is never placed in the pushed folder"
+    with pytest.raises(ka.AutomationError, match="either"):
+        ka.prepare("baseline", SHA, "u", "9", tmp_path / "j3", config_path="configs/example_cloth.json",
+                   batch=ka.validate_batch("auto", 2, 1, "720p"))
+
+
+def make_result(tmp_path, names, qc_ok=True, status="ok"):
+    (tmp_path / "run_info.json").write_text(json.dumps({"status": "ok"}))
+    items = []
+    for n in names:
+        d = tmp_path / n
+        d.mkdir()
+        (d / f"{n}.mp4").write_bytes(b"x")
+        (d / "benchmark.json").write_text('{"summary": {}}')
+        (d / "metadata.json").write_text("{}")
+        (d / "qc_report.json").write_text(json.dumps({"passed": qc_ok}))
+        items.append({"name": n, "status": status})
+    (tmp_path / "manifest.json").write_text(json.dumps({"items": items}))
+
+
+def test_verify_batch_output(tmp_path):
+    make_result(tmp_path, ["a_000", "a_001"])
+    ka.verify_output(tmp_path, "batch", "batch", True)
+    assert ka.unexpected_files(tmp_path, "batch", "batch", True) == []
+
+
+def test_verify_batch_flags_failed_qc_status_and_missing_files(tmp_path):
+    make_result(tmp_path, ["a_000"], qc_ok=False)
+    with pytest.raises(ka.AutomationError, match="QC failed"):
+        ka.verify_output(tmp_path, "batch", "batch", True)
+    other = tmp_path / "o"; other.mkdir()
+    make_result(other, ["b_000"], status="failed")
+    with pytest.raises(ka.AutomationError, match="status failed"):
+        ka.verify_output(other, "batch", "batch", True)
+    (other / "b_000" / "b_000.mp4").unlink()
+    with pytest.raises(ka.AutomationError, match="missing"):
+        ka.verify_output(other, "batch", "batch", True)
+
+
+def test_verify_single_requires_passing_qc_when_a_report_exists(tmp_path):
+    (tmp_path / "run_info.json").write_text(json.dumps({"status": "ok"}))
+    (tmp_path / "v1_1_a.mp4").write_bytes(b"x")
+    (tmp_path / "benchmark.json").write_text('{"summary": {}}')
+    ka.verify_output(tmp_path, "baseline")                                # old-style output (no QC file) still verifies
+    (tmp_path / "qc_report.json").write_text(json.dumps({"passed": False, "checks": [{"name": "valid fps", "ok": False}]}))
+    with pytest.raises(ka.AutomationError, match="valid fps"):
+        ka.verify_output(tmp_path, "baseline")
+
+
+def test_workflow_inputs_are_validated_and_secrets_stay_in_env():
+    text = (ROOT / ".github" / "workflows" / "kaggle-gpu-test.yml").read_text()
+    for name in ("config_path", "batch_variations", "batch_experiment", "batch_seed", "preset", "multiple_balls"):
+        assert name in text
+    runs = [blk for blk in text.split("run: |")[1:]]
+    for blk in runs:
+        body = blk.split("\n      - ")[0]
+        assert "${{ inputs." not in body and "${{ secrets." not in body, "inputs/secrets must reach scripts via env only"
+    assert "KAGGLE_API_TOKEN" in text and "echo \"$KAGGLE_API_TOKEN\"" not in text

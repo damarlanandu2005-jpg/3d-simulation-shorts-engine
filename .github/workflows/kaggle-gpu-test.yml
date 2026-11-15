@@ -1,7 +1,11 @@
 name: kaggle-gpu-test
 
-# Manual only. Launches ONE private Kaggle GPU kernel that clones this exact commit, renders one of
-# three fixed V1.1 configs, then downloads the mp4 + benchmark.json as workflow artifacts.
+# Manual only. Launches ONE private Kaggle GPU kernel that clones this exact commit and renders either
+#   - one of the fixed configs (V1.1 baseline/optix/1080p or an experiment config), or
+#   - a validated config path under configs/ (config_path), or
+#   - a BATCH of physically different variations of an experiment (batch_variations > 0),
+# then downloads the mp4s + benchmark/metadata/QC reports as workflow artifacts. Every input is validated by
+# kaggle/kaggle_automation.py; nothing free-form reaches the kernel.
 # Run Actions > kaggle-auth-check first.
 on:
   workflow_dispatch:
@@ -15,6 +19,45 @@ on:
           - baseline # configs/v1_1_a_baseline.json  720x1280, 16 spp, no denoise
           - optix    # configs/v1_1_b_optix.json      720x1280, 16 spp, OptiX denoise
           - 1080p    # configs/v1_1_c_1080p.json      1080x1920, 16 spp, no denoise
+          - multiple_balls # configs/experiments/multiple_balls_100.json
+          - ball_funnel    # configs/experiments/ball_funnel_hole.json
+          - ring_toss      # configs/experiments/ring_toss_smaller.json
+          - cloth_objects  # configs/experiments/cloth_objects_more.json
+      config_path:
+        description: "Optional: render this repo config instead (e.g. configs/experiments/ring_toss_smaller.json); empty = use test_config"
+        type: string
+        required: false
+        default: ""
+      batch_variations:
+        description: "Batch mode: number of physically different videos (1-12). 0 = single video"
+        type: string
+        required: false
+        default: "0"
+      batch_experiment:
+        description: Batch mode - experiment to vary
+        type: choice
+        required: false
+        default: auto
+        options:
+          - auto
+          - multiple_balls
+          - ball_funnel
+          - ring_toss
+          - cloth_objects
+          - cloth_drape
+      batch_seed:
+        description: "Batch mode - master seed (integer) or auto (derived from the run id, recorded in the manifest)"
+        type: string
+        required: false
+        default: auto
+      preset:
+        description: Batch mode - 720p is the fast production preset, 1080p the quality preset
+        type: choice
+        required: false
+        default: 720p
+        options:
+          - 720p
+          - 1080p
       accelerator:
         description: Kaggle GPU to request (try another if the kernel stays queued)
         type: choice
@@ -39,6 +82,11 @@ jobs:
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       TEST_CONFIG: ${{ inputs.test_config }}
+      CONFIG_PATH: ${{ inputs.config_path }}
+      BATCH_VARIATIONS: ${{ inputs.batch_variations }}
+      BATCH_EXPERIMENT: ${{ inputs.batch_experiment }}
+      BATCH_SEED: ${{ inputs.batch_seed }}
+      PRESET: ${{ inputs.preset }}
       ACCELERATOR: ${{ inputs.accelerator }}
       COMMIT_SHA: ${{ github.sha }}
       RUN_ID: ${{ github.run_id }}
@@ -78,9 +126,17 @@ jobs:
       - name: Prepare kernel (fixed config mapping, pinned commit)
         id: prep
         run: |
+          ARGS=()
+          if [ "${BATCH_VARIATIONS:-0}" != "0" ]; then
+            SEED="$BATCH_SEED"; if [ "$SEED" = auto ]; then SEED=$(( RUN_ID % 1000000 )); fi
+            ARGS+=(--batch-experiment "$BATCH_EXPERIMENT" --batch-variations "$BATCH_VARIATIONS" --batch-seed "$SEED" --preset "$PRESET")
+          elif [ -n "$CONFIG_PATH" ]; then
+            ARGS+=(--config-path "$CONFIG_PATH")
+          fi
           KERNEL=$(python kaggle/kaggle_automation.py prepare \
             --test-config "$TEST_CONFIG" --sha "$COMMIT_SHA" \
-            --username "$KAGGLE_USERNAME" --run-id "$RUN_ID" --accelerator "$ACCELERATOR" --out kaggle_job)
+            --username "$KAGGLE_USERNAME" --run-id "$RUN_ID" --accelerator "$ACCELERATOR" --out kaggle_job \
+            --job-file job.json "${ARGS[@]}")
           echo "kernel=$KERNEL" >> "$GITHUB_OUTPUT"
           echo "Prepared $KERNEL for commit $COMMIT_SHA, test_config=$TEST_CONFIG"
 
@@ -116,11 +172,11 @@ jobs:
           f=$(find kaggle_out -name run_info.json | head -1)
           [ -n "$f" ] && cat "$f" || echo "no run_info.json downloaded (kernel died before writing it)"
 
-      - name: Verify mp4, benchmark.json and run_info.json
+      - name: Verify videos, benchmark/metadata/QC files and run_info.json
         run: |
           # kernel writes /kaggle/working/result/*; the CLI may keep that subfolder
           DIR=kaggle_out; [ -d kaggle_out/result ] && DIR=kaggle_out/result
-          python kaggle/kaggle_automation.py verify --test-config "$TEST_CONFIG" --dir "$DIR"
+          python kaggle/kaggle_automation.py verify --job-file job.json --dir "$DIR"
           echo "RESULT_DIR=$DIR" >> "$GITHUB_ENV"
 
       - name: Show benchmark summary (also in the run summary page)
@@ -129,25 +185,33 @@ jobs:
           import json, os
           d = os.environ["RESULT_DIR"]
           info = json.load(open(f"{d}/run_info.json"))
-          b = json.load(open(f"{d}/benchmark.json"))
           print(f"### kaggle-gpu-test: {info.get('test_config')} @ {info.get('commit', '')[:7]}")
-          print("run_info:", json.dumps({k: info.get(k) for k in ("gpu", "bpy", "wall_seconds", "video_bytes", "status")}))
-          print("summary:", json.dumps(b.get("summary"), indent=1))
+          print("run_info:", json.dumps({k: info.get(k) for k in ("gpu", "bpy", "wall_seconds", "video_bytes", "status", "batch", "batch_status")}))
+          if os.path.isfile(f"{d}/benchmark.json"):
+              print("summary:", json.dumps(json.load(open(f"{d}/benchmark.json")).get("summary"), indent=1))
+              if os.path.isfile(f"{d}/qc_report.json"):
+                  qc = json.load(open(f"{d}/qc_report.json")); print("QC passed:", qc["passed"])
+          else:
+              m = json.load(open(f"{d}/manifest.json"))
+              for it in m["items"]:
+                  print(f"- {it['name']}: {it['status']} qc={it.get('qc_passed')} {it.get('seconds')}s changed={it['changed']}")
           PY
 
       - name: Inspect final video streams (audio present? durations)
         run: |
           set -eo pipefail
           sudo apt-get install -y -qq ffmpeg > /dev/null
-          mp4=$(ls "$RESULT_DIR"/*.mp4 | head -1)
-          echo "video file: $mp4"
-          ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,duration -of compact "$mp4" | tee -a "$GITHUB_STEP_SUMMARY"
+          for mp4 in $(find "$RESULT_DIR" -name "*.mp4" | sort); do
+            echo "video file: $mp4"
+            ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,duration -of compact "$mp4" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
           python - <<'PY'
           import json, os
-          jobs = json.load(open(os.environ["RESULT_DIR"] + "/benchmark.json"))["jobs"]
-          kinds = [j["kind"] for j in jobs]
-          print("job kinds:", {k: kinds.count(k) for k in dict.fromkeys(kinds)})
-          print("card jobs present:", "card_render" in kinds, "| audio mix job present:", "audio" in kinds)
+          p = os.environ["RESULT_DIR"] + "/benchmark.json"
+          if os.path.isfile(p):
+              kinds = [j["kind"] for j in json.load(open(p))["jobs"]]
+              print("job kinds:", {k: kinds.count(k) for k in dict.fromkeys(kinds)})
+              print("card jobs present:", "card_render" in kinds, "| audio mix job present:", "audio" in kinds)
           PY
 
       - name: Upload results

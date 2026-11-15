@@ -33,7 +33,8 @@ CONFIGS = {
     "1080p": ("configs/v1_1_c_1080p.json", "v1_1_c"),
 }
 
-ACCELERATOR = "NvidiaTeslaT4"  # passed to `kaggle kernels push --accelerator`
+ACCELERATOR = "NvidiaTeslaT4"  # default; passed to `kaggle kernels push --accelerator`
+ACCELERATORS = ("NvidiaTeslaT4", "NvidiaL4", "default")  # "default" = request a GPU, let Kaggle choose
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 USER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 RUN_RE = re.compile(r"^[0-9]{1,20}$")
@@ -192,10 +193,12 @@ def build_kernel_script(key: str, sha: str) -> str:
     return script
 
 
-def build_metadata(username: str, slug: str, code_file: str = "kernel.py") -> dict:
+def build_metadata(username: str, slug: str, code_file: str = "kernel.py", accelerator: str = ACCELERATOR) -> dict:
     if not USER_RE.match(username):
         raise AutomationError("invalid Kaggle username")
-    return {
+    if accelerator not in ACCELERATORS:
+        raise AutomationError(f"accelerator must be one of {ACCELERATORS}")
+    meta = {
         "id": f"{username}/{slug}",
         "title": slug,
         "code_file": code_file,
@@ -204,21 +207,23 @@ def build_metadata(username: str, slug: str, code_file: str = "kernel.py") -> di
         "is_private": True,
         "enable_gpu": True,
         "enable_internet": True,
-        "machine_shape": ACCELERATOR,
         "dataset_sources": [],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": [],
     }
+    if accelerator != "default":
+        meta["machine_shape"] = accelerator
+    return meta
 
 
-def prepare(key: str, sha: str, username: str, run_id: str, out: Path) -> str:
+def prepare(key: str, sha: str, username: str, run_id: str, out: Path, accelerator: str = ACCELERATOR) -> str:
     if not RUN_RE.match(run_id):
         raise AutomationError("run id must be numeric")
     slug = kernel_slug(key, sha, run_id)
     out.mkdir(parents=True, exist_ok=True)
     (out / "kernel.py").write_text(build_kernel_script(key, sha))
-    (out / "kernel-metadata.json").write_text(json.dumps(build_metadata(username, slug), indent=2))
+    (out / "kernel-metadata.json").write_text(json.dumps(build_metadata(username, slug, accelerator=accelerator), indent=2))
     return f"{username}/{slug}"
 
 
@@ -232,8 +237,9 @@ def parse_status(text: str) -> str:
     return m.group(1).split(".")[-1].upper()
 
 
-def wait(kernel: str, timeout_s: int, interval_s: int) -> str:
-    deadline = time.time() + timeout_s
+def wait(kernel: str, timeout_s: int, interval_s: int, max_queue_s: int = 0) -> str:
+    start = time.time()
+    deadline = start + timeout_s
     last = ""
     while time.time() < deadline:
         r = subprocess.run(["kaggle", "kernels", "status", kernel], capture_output=True, text=True)
@@ -243,6 +249,10 @@ def wait(kernel: str, timeout_s: int, interval_s: int) -> str:
             last = status
         if status in TERMINAL_OK:
             return status
+        if max_queue_s and status in ("QUEUED", "UNKNOWN") and time.time() - start > max_queue_s:
+            raise AutomationError(
+                f"kernel still {status} after {max_queue_s // 60} min (Kaggle has no free GPU for it). "
+                f"Stop the kernel on kaggle.com ({kernel}) and retry later or with another accelerator.")
         if status in TERMINAL_BAD:
             raise AutomationError(f"Kaggle kernel ended with status {status}")
         time.sleep(interval_s)
@@ -283,20 +293,22 @@ def main(argv=None) -> int:
     a.add_argument("--sha", required=True)
     a.add_argument("--username", required=True)
     a.add_argument("--run-id", required=True)
+    a.add_argument("--accelerator", default=ACCELERATOR, choices=ACCELERATORS)
     a.add_argument("--out", required=True, type=Path)
     w = sub.add_parser("wait")
     w.add_argument("--kernel", required=True)
     w.add_argument("--timeout", type=int, default=3 * 3600)
     w.add_argument("--interval", type=int, default=60)
+    w.add_argument("--max-queue", type=int, default=1500, help="fail if still queued after this many seconds (0=off)")
     v = sub.add_parser("verify")
     v.add_argument("--test-config", required=True, choices=sorted(CONFIGS))
     v.add_argument("--dir", required=True, type=Path)
     args = p.parse_args(argv)
     try:
         if args.cmd == "prepare":
-            print(prepare(args.test_config, args.sha, args.username, args.run_id, args.out))
+            print(prepare(args.test_config, args.sha, args.username, args.run_id, args.out, args.accelerator))
         elif args.cmd == "wait":
-            wait(args.kernel, args.timeout, args.interval)
+            wait(args.kernel, args.timeout, args.interval, args.max_queue)
         else:
             verify_output(args.dir, args.test_config)
             print("output verified")

@@ -111,3 +111,21 @@ def test_verify_fails_on_kernel_failure_and_bad_benchmark(tmp_path):
     (tmp_path / "benchmark.json").write_text("{}")
     with pytest.raises(ka.AutomationError):
         ka.verify_output(tmp_path, "baseline")
+
+
+def test_accelerator_option(tmp_path):
+    assert ka.build_metadata("u", "s")["machine_shape"] == "NvidiaTeslaT4"
+    assert "machine_shape" not in ka.build_metadata("u", "s", accelerator="default")
+    with pytest.raises(ka.AutomationError):
+        ka.build_metadata("u", "s", accelerator="x; rm")
+
+
+def test_queue_timeout(monkeypatch):
+    class R:
+        returncode = 0
+        stdout = 'u/k has status "KernelWorkerStatus.QUEUED"'
+        stderr = ""
+    monkeypatch.setattr(ka.subprocess, "run", lambda *a, **k: R())
+    monkeypatch.setattr(ka.time, "sleep", lambda s: None)
+    with pytest.raises(ka.AutomationError, match="still QUEUED"):
+        ka.wait("u/k", timeout_s=100, interval_s=0, max_queue_s=0.0001)

@@ -125,6 +125,17 @@ class CardsCfg:
 
 
 @dataclass
+class AudioCfg:
+    """Background music mixed into the final MP4 by FFmpeg (the video itself is never re-encoded)."""
+
+    enabled: bool = False
+    music: str = "assets/audio/default_music.wav"  # relative paths resolve from the project root, then the cwd
+    volume_db: float = -18.0  # gain applied to the track; keep it subtle, the simulation is the star
+    fade_in: float = 0.5  # seconds
+    fade_out: float = 1.0  # seconds
+
+
+@dataclass
 class VideoCfg:
     hook_seconds: float = 2.0
     crf: int = 18
@@ -155,6 +166,7 @@ class Config:
     output: OutputCfg = field(default_factory=OutputCfg)
     label: LabelCfg = field(default_factory=LabelCfg)
     video: VideoCfg = field(default_factory=VideoCfg)
+    audio: AudioCfg = field(default_factory=AudioCfg)
 
     @property
     def frame_count(self) -> int:
@@ -169,6 +181,13 @@ class Config:
 
     def final_video_path(self) -> Path:
         return self.root_dir / f"{self.name}.mp4"
+
+    def silent_video_path(self) -> Path:
+        """Video before the music is mixed in (only produced when audio is enabled)."""
+        return self.root_dir / f"{self.name}_silent.mp4"
+
+    def music_path(self) -> Path:
+        return resolve_asset(self.audio.music)
 
     def camera_for_stage(self, index: int) -> CameraCfg:
         """Base camera merged with this stage's optional override."""
@@ -277,6 +296,20 @@ def make_stage(cfg: Config, index: int, faces: int) -> Stage:
         frames_dir=root / tag / "frames",
         clip_path=root / tag / f"{tag}.mp4",
     )
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def resolve_asset(path: str) -> Path:
+    """Absolute paths are used as given; relative ones are looked up from the project root, then the cwd."""
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    for base in (PROJECT_ROOT, Path.cwd()):
+        if (base / p).exists():
+            return base / p
+    return PROJECT_ROOT / p
 
 
 def _build(cls, data: dict, path: str):
@@ -401,6 +434,14 @@ def _validate_video(cfg: Config) -> None:
             c.title.format(ratio="16")
         except (KeyError, IndexError, ValueError) as exc:
             raise ConfigError(f"video.cards.title is invalid: {exc!r}") from exc
+    a = cfg.audio
+    if a.enabled:
+        if not isinstance(a.music, str) or not a.music:
+            raise ConfigError("audio.music must be a file path when audio.enabled is true")
+        if not -60 <= a.volume_db <= 6:
+            raise ConfigError("audio.volume_db must be between -60 and 6")
+        if a.fade_in < 0 or a.fade_out < 0:
+            raise ConfigError("audio.fade_in / audio.fade_out must be >= 0")
 
 
 def from_dict(data: dict) -> Config:

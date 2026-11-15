@@ -105,26 +105,44 @@ def test_cli_reports_config_errors(tmp_path, capsys):
 A_PATH = str(ROOT / "configs" / "v1_1_a_baseline.json")
 
 
-def _plan_a(**kw):
-    cfg = load_config(A_PATH)
+def _plan_a(cards=False, audio=True, **kw):
+    """Plan config A; `cards=True` re-enables the (optional) multiplier cards, `audio=False` drops the music."""
+    import json
+    from shorts_engine.config import from_dict
+    data = json.loads(Path(A_PATH).read_text(encoding="utf-8"))
+    data["video"]["cards"]["enabled"] = cards
+    data["audio"]["enabled"] = audio
+    cfg = from_dict(data)
     return cfg, render.plan_jobs(cfg, A_PATH, ["blender"], True, **kw)
 
 
-def test_v11_full_plan_order():
+def _concat_names(jobs):
+    text = next(j for j in jobs if j.kind == "concat").write_text[1]
+    return [Path(line.split("'")[1]).name for line in text.strip().splitlines()]
+
+
+def test_v11_production_plan_has_no_cards_and_ends_with_music():
     cfg, jobs = _plan_a()
     kinds = [j.kind for j in jobs]
-    assert kinds == (["bake", "render"] * 4 + ["hook_render"] + ["card_render"] * 3 + ["clip"] * 7 + ["hook", "concat"])
+    assert kinds == (["bake", "render"] * 4 + ["hook_render"] + ["clip"] * 4 + ["hook", "concat", "audio"])
+    assert "card_render" not in kinds
     hook_job = next(j for j in jobs if j.kind == "hook_render")
     assert hook_job.cmd[-2:] == ["--mode", "hook"] and hook_job.stage == 3      # last stage's baked cache
+
+
+def test_stage_sequence_is_exactly_hook_then_four_stages():
+    cfg, jobs = _plan_a()
+    assert _concat_names(jobs) == ["hook.mp4", "stage_00_64.mp4", "stage_01_1024.mp4",
+                                   "stage_02_4096.mp4", "stage_03_16384.mp4"]
+
+
+def test_multiplier_cards_are_still_available_when_enabled():
+    cfg, jobs = _plan_a(cards=True)
+    kinds = [j.kind for j in jobs]
+    assert kinds == (["bake", "render"] * 4 + ["hook_render"] + ["card_render"] * 3 + ["clip"] * 7 + ["hook", "concat", "audio"])
     cards = [j for j in jobs if j.kind == "card_render"]
     assert [j.cmd[j.cmd.index("--card-index") + 1] for j in cards] == ["0", "1", "2"]
-
-
-def test_v11_concat_order_is_hook_then_stages_interleaved_with_cards():
-    cfg, jobs = _plan_a()
-    text = jobs[-1].write_text[1]
-    names = [Path(line.split("'")[1]).parent.name + "/" + Path(line.split("'")[1]).name for line in text.strip().splitlines()]
-    assert [n.split("/")[1] for n in names] == [
+    assert _concat_names(jobs) == [
         "hook.mp4", "stage_00_64.mp4", "card_00.mp4", "stage_01_1024.mp4", "card_01.mp4",
         "stage_02_4096.mp4", "card_02.mp4", "stage_03_16384.mp4"]
 
@@ -139,16 +157,16 @@ def test_closeup_hook_encodes_with_its_own_start_frame_and_checks_frames():
 
 
 def test_only_extras_rerenders_hook_and_cards_without_touching_stages():
-    cfg, jobs = _plan_a(only_extras=True)
+    cfg, jobs = _plan_a(cards=True, only_extras=True)
     kinds = [j.kind for j in jobs]
     assert "bake" not in kinds and "render" not in kinds
-    assert kinds[:4] == ["hook_render"] + ["card_render"] * 3 and kinds[-1] == "concat"
+    assert kinds[:4] == ["hook_render"] + ["card_render"] * 3 and kinds[-2:] == ["concat", "audio"]
 
 
 def test_skip_extras_gives_the_plain_v1_structure():
-    cfg, jobs = _plan_a(skip_extras=True)
+    cfg, jobs = _plan_a(cards=True, skip_extras=True)
     kinds = [j.kind for j in jobs]
-    assert kinds == ["bake", "render"] * 4 + ["clip"] * 4 + ["hook", "concat"]
+    assert kinds == ["bake", "render"] * 4 + ["clip"] * 4 + ["hook", "concat", "audio"]
     hook = next(j for j in jobs if j.kind == "hook")
     assert "-sseof" in hook.cmd                                                  # tail hook, no extra render
 

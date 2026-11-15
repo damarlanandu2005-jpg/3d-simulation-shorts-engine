@@ -33,9 +33,17 @@ def test_labels_use_thousands_separator():
     assert [s.label for s in A.stages()] == ["64 FACES", "1,024 FACES", "4,096 FACES", "16,384 FACES"]
 
 
+def test_production_configs_have_cards_off_and_music_on():
+    for cfg in (A, B, C):
+        assert not cfg.video.cards.enabled and cfg.cards() == []
+        assert cfg.audio.enabled and cfg.audio.volume_db == -18 and cfg.music_path().is_file()
+
+
 def test_cards_and_ratios():
-    assert [(c.title, c.subtitle) for c in A.cards()] == [("×16", "MORE FACES"), ("×4", "MORE FACES"), ("×4", "MORE FACES")]
-    assert all(c.frames == 15 for c in A.cards())  # 0.5 s at 30 fps
+    from dataclasses import replace
+    on = replace(A, video=replace(A.video, cards=replace(A.video.cards, enabled=True)))
+    assert [(c.title, c.subtitle) for c in on.cards()] == [("×16", "MORE FACES"), ("×4", "MORE FACES"), ("×4", "MORE FACES")]
+    assert all(c.frames == 15 for c in on.cards())  # 0.5 s at 30 fps
     assert format_ratio(64, 16384) == "256" and format_ratio(64, 100) == "1.6"
 
 

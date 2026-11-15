@@ -247,6 +247,23 @@ tests/
 
 See `LICENSES.md`. No third-party code is copied. Add your own `LICENSE` file before sharing the repo.
 
+## V1.1 update: no multiplier cards, background music
+
+* **Multiplier cards** (`x16 MORE` etc.) are now off in the V1.1 configs via `video.cards.enabled = false`.
+  The feature still exists; set it to `true` to get them back. The final sequence is
+  `hook -> 64 -> 1,024 -> 4,096 -> 16,384 FACES`. Turning cards off needs no re-bake.
+* **Background music** is a reusable layer mixed in by FFmpeg after the clips are joined (the video stream is
+  copied, not re-encoded). Config (top level):
+
+  ```json
+  "audio": {"enabled": true, "music": "assets/audio/default_music.wav", "volume_db": -18, "fade_in": 0.5, "fade_out": 1.0}
+  ```
+
+  The track loops if shorter than the video and is trimmed if longer, with fades; the audio never outlasts the
+  picture. A missing music file fails at planning time with a clear error. The video before mixing is kept as
+  `<name>_silent.mp4`. Relative music paths resolve from the project root. The default track is original
+  (see `LICENSES.md`, regenerate with `python tools/make_default_music.py`).
+
 ## GitHub -> Kaggle GPU test automation (experimental, V1.1 tests)
 
 Two manual workflows (Actions tab > Run workflow, branch `v1.1`). Needs repo secrets

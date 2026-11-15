@@ -37,7 +37,7 @@ GENERATE_PY = Path(__file__).with_name("generate_scene.py")
 @dataclass
 class Job:
     name: str
-    kind: str  # bake | render | hook_render | card_render | clip | hook | concat
+    kind: str  # bake | render | hook_render | card_render | clip | hook | concat | audio
     cmd: list
     stage: int | None = None
     write_text: tuple | None = None  # (path, text) written before running (concat list)
@@ -169,10 +169,25 @@ def plan_jobs(
                             assemble.hook_cmd(all_stages[-1].clip_path, cfg.video.hook_seconds, cfg.fps, hook, cfg.video.crf, ffmpeg)))
             sequence = [hook] + sequence
 
+        # total picture length, from frame counts (every clip is encoded at the same fps)
+        total_frames = len(all_stages) * cfg.frame_count + sum(c.frames for c in cards)
+        if hook_mode == "closeup" or (hook_mode == "tail" and cfg.video.hook_seconds > 0):
+            total_frames += hook_last - hook_first + 1
+        duration = total_frames / cfg.fps
+
         list_file = cfg.root_dir / "concat.txt"
+        audio_on = cfg.audio.enabled
+        concat_out = cfg.silent_video_path() if audio_on else cfg.final_video_path()
         jobs.append(Job("concatenate", "concat",
-                        assemble.concat_cmd(list_file, cfg.final_video_path(), ffmpeg),
+                        assemble.concat_cmd(list_file, concat_out, ffmpeg),
                         write_text=(list_file, assemble.concat_list_text(sequence))))
+        if audio_on:
+            music = cfg.music_path()
+            if not music.is_file():
+                raise ConfigError(f"audio.music file not found: {music} (set audio.enabled=false or fix the path)")
+            jobs.append(Job("mix background music", "audio",
+                            assemble.audio_mix_cmd(concat_out, music, cfg.final_video_path(), duration,
+                                                   cfg.audio.volume_db, cfg.audio.fade_in, cfg.audio.fade_out, ffmpeg)))
     return jobs
 
 

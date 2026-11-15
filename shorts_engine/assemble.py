@@ -54,6 +54,34 @@ def concat_cmd(list_file: Path, out: Path, ffmpeg: str = "ffmpeg") -> list[str]:
     ]
 
 
+def audio_mix_cmd(video: Path, music: Path, out: Path, duration: float, volume_db: float = -18.0,
+                  fade_in: float = 0.5, fade_out: float = 1.0, ffmpeg: str = "ffmpeg") -> list[str]:
+    """Mix a background track under ``video`` without re-encoding the video.
+
+    The track is looped if it is shorter than the video and trimmed if it is longer, so the audio
+    never outlasts the picture. Fades are clamped to half the duration each.
+    """
+    if duration <= 0:
+        raise ValueError("duration must be > 0")
+    fi = min(max(fade_in, 0.0), duration / 2)
+    fo = min(max(fade_out, 0.0), duration / 2)
+    chain = ["aresample=48000", f"volume={volume_db:g}dB"]
+    if fi > 0:
+        chain.append(f"afade=t=in:st=0:d={fi:.3f}")
+    if fo > 0:
+        chain.append(f"afade=t=out:st={duration - fo:.3f}:d={fo:.3f}")
+    chain += [f"atrim=0:{duration:.3f}", "asetpts=PTS-STARTPTS"]
+    return [
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(video), "-stream_loop", "-1", "-i", str(music),
+        "-filter_complex", f"[1:a]{','.join(chain)}[a]",
+        "-map", "0:v:0", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        "-t", f"{duration:.3f}", "-shortest", "-movflags", "+faststart",
+        str(out),
+    ]
+
+
 def expected_frames(frames_dir: Path, last: int, first: int = 1) -> list[Path]:
     return [Path(frames_dir) / f"frame_{i:04d}.png" for i in range(first, last + 1)]
 

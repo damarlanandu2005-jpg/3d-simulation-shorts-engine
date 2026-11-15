@@ -343,7 +343,8 @@ class ExperimentConfig(Config):
 
     def stage_label(self, value) -> str:
         t = self.template
-        return self.label.template.format(**{**self.params, t.stage_param: value, **t.label_values(self.params, value)})
+        p = {**self.params, "shape": self.shape}
+        return self.label.template.format(**{**p, t.stage_param: value, **t.label_values(p, value)})
 
     def cards(self) -> list["Card"]:
         return []
@@ -354,14 +355,14 @@ class ExperimentConfig(Config):
         if text in ("", "auto"):
             return
         try:
-            text.format(**t.hook_values(t.resolve_params(self.params), self.stage_values or [1]))
+            text.format(**t.hook_values({**t.resolve_params(self.params), "shape": self.shape}, self.stage_values or [1]))
         except (KeyError, IndexError, ValueError, ZeroDivisionError) as exc:
             raise ConfigError(f"video.hook.text is invalid for {t.name} (allowed placeholders: "
-                              f"{sorted(t.hook_values(t.resolve_params(self.params), [1, 2]))}): {exc!r}") from exc
+                              f"{sorted(t.hook_values({**t.resolve_params(self.params), 'shape': self.shape}, [1, 2]))}): {exc!r}") from exc
 
     def hook_text(self) -> str:
         t = self.template
-        vals = t.hook_values(self.params, self.stage_values)
+        vals = t.hook_values({**self.params, "shape": self.shape}, self.stage_values)
         text = self.video.hook.text
         if text == "auto":
             text = t.hooks[self.seed % len(t.hooks)]

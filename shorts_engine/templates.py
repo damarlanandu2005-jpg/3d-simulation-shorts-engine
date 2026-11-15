@@ -179,8 +179,12 @@ def _cloth_label(params, faces):
     return {"faces": f"{faces:,}", "faces_short": short_face_label(faces)}
 
 
+_SHAPE_WORD = {"sphere": "BALL", "cube": "CUBE", "cylinder": "CAN"}
+
+
 def _balls_label(params, n):
-    return {"balls": f"{n:,}", "ball_word": plural(n, "BALL")}
+    word = _SHAPE_WORD.get(params.get("shape", "sphere"), "BALL")
+    return {"balls": f"{n:,}", "ball_word": plural(n, word), "thing": word, "things": word + "S"}
 
 
 def _balls_region(p, n):
@@ -261,7 +265,7 @@ register(ExperimentTemplate(
     },
     stage_param="balls", stage_def=ParamDef(None, 1, 400, kind="int"), default_stage_values=(1, 10, 50, 100),
     label="{balls} {ball_word}", label_values=_balls_label,
-    hooks=("WHAT HAPPENS WHEN WE DROP {last} BALLS?", "{first} BALL VS {last} BALLS", "ONE BALL IS EASY. NOW {last}."),
+    hooks=("WHAT HAPPENS WHEN WE DROP {last} {things}?", "{first} {thing} VS {last} {things}", "ONE {thing} IS EASY. NOW {last}."),
     frame_region=_balls_region,
     variations={"ball_radius": (0.14, 0.34), "drop_height": (1.2, 4.0), "restitution": (0.15, 0.85),
                 "friction": (0.1, 1.2), "spread": (1.0, 2.0)},

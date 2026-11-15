@@ -105,6 +105,25 @@ def already_done(item: dict, video_root: Path) -> bool:
     return bool(qc and qc.get("passed") and meta and (meta.get("variation") or {}).get("config_hash") == item["config_hash"])
 
 
+def safe_config(cfg: dict) -> dict:
+    """A cheaper, more conservative render of the same physical experiment (same seed, same parameters)."""
+    safe = json.loads(json.dumps(cfg))
+    safe.setdefault("render", {}).update({"samples": 8, "denoise": False})
+    safe["camera"] = {**(safe.get("camera") or {}), "preset": "wide", "motion": "static"}
+    safe["hook"] = {**(safe.get("hook") or {}), "mode": "closeup"}
+    return safe
+
+
+def _run_once(runner, cfg_path, render_args, item):
+    try:
+        return runner(["--config", str(cfg_path), *render_args])
+    except SystemExit as exc:                                       # job failures raise SystemExit in the orchestrator
+        return exc.code if isinstance(exc.code, int) else 1
+    except Exception as exc:                                        # noqa: BLE001 - isolate any per-video failure
+        item["error"] = repr(exc)[:300]
+        return 1
+
+
 def run_batch(manifest: dict, batch_dir: Path, render_args: list[str], runner=None) -> dict:
     """Run every planned video; record status/duration/QC per item; never stop on a single failure."""
     from . import render
@@ -116,13 +135,20 @@ def run_batch(manifest: dict, batch_dir: Path, render_args: list[str], runner=No
             item["status"] = "skipped_existing"
             continue
         t = time.perf_counter()
-        try:
-            code = runner(["--config", item["config"], *render_args])
-        except SystemExit as exc:                                   # job failures raise SystemExit in the orchestrator
-            code = exc.code if isinstance(exc.code, int) else 1
-        except Exception as exc:                                    # noqa: BLE001 - isolate any per-video failure
-            code = 1
-            item["error"] = repr(exc)[:300]
+        code = _run_once(runner, item["config"], render_args, item)
+        vdir = batch_dir / "videos" / item["name"]
+        qc0 = read_json(vdir / "qc_report.json")
+        if code != 0 or (qc0 and qc0.get("passed") is False):         # diagnose, then retry once with a safe configuration
+            item["attempts"] = [{"config": item["config"], "exit_code": code, "error": item.get("error"),
+                                 "qc_failures": (qc0 or {}).get("failures") or (qc0 or {}).get("errors")}]
+            safe_path = Path(item["config"]).with_name(Path(item["config"]).stem + ".safe.json")
+            safe_path.write_text(json.dumps(safe_config(json.loads(Path(item["config"]).read_text())), indent=1))
+            meta = Path(str(item["config"]) + ".meta.json")
+            if meta.is_file():
+                Path(str(safe_path) + ".meta.json").write_text(meta.read_text())
+            code = _run_once(runner, safe_path, render_args, item)
+            item["retried_with_safe_config"] = str(safe_path)
+            item["attempts"].append({"config": str(safe_path), "exit_code": code})
         item["seconds"] = round(time.perf_counter() - t, 1)
         item["exit_code"] = code
         qc = read_json(batch_dir / "videos" / item["name"] / "qc_report.json")

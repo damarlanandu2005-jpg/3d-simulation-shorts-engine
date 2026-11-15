@@ -84,6 +84,7 @@ class ExperimentTemplate:
     variations: dict = field(default_factory=dict)   # param -> (low, high) physical ranges for batch variation
     stage_variations: tuple = ()                     # alternative stage progressions the batch generator can pick
     events: str = "impulse"                          # event detector key (generate_scene.EVENT_DETECTORS)
+    validate: Callable | None = None                 # (params, stage values, shape) -> raises ConfigError on a broken combination
     stage_meaning: str = ""
 
     def resolve_params(self, given: dict, path: str = "experiment.params") -> dict:
@@ -222,6 +223,57 @@ def _objects_region(p, n):
     return Region(half_width=half, top=p["object_scale"] * 2 + p["drop_height"] + 0.6)
 
 
+def _fail(msg):
+    raise ConfigError(msg)
+
+
+def _check_balls(p, stages, shape):
+    r, arena = p["ball_radius"], p["arena_radius"]
+    if p["spread"] + r > arena * 0.95:
+        _fail(f"spread ({p['spread']}) + ball_radius must fit inside arena_radius ({arena}): objects would start outside the arena")
+    if 3 * r > arena:
+        _fail(f"ball_radius {r} is too large for arena_radius {arena}")
+    cap = 3 * 0.8 * (arena / r) ** 2
+    if max(stages) > cap:
+        _fail(f"{max(stages)} objects of radius {r} do not fit in an arena of radius {arena} (limit about {int(cap)}); "
+              "enlarge arena_radius or reduce the count")
+
+
+def _check_funnel(p, stages, shape):
+    r, R = p["ball_radius"], p["funnel_radius"]
+    for h in stages:
+        if h >= R * 0.8:
+            _fail(f"hole_radius {h} must be well below funnel_radius {R} (< {R * 0.8:.2f})")
+        if h < r * 0.5:
+            _fail(f"hole_radius {h} is smaller than half a ball radius ({r}); nothing could ever pass")
+    h0 = max(stages)
+    volume = (1 / 3) * p["funnel_height"] * (R * R + R * h0 + h0 * h0)
+    if p["balls"] * (4 / 3) * r ** 3 > 0.9 * volume:
+        _fail(f"{p['balls']} balls of radius {r} do not fit in the funnel (volume {volume:.2f}); reduce balls or ball_radius")
+    if 2 * r > R * 0.5:
+        _fail(f"ball_radius {r} is too large relative to funnel_radius {R}")
+
+
+def _check_rings(p, stages, shape):
+    outer = p["pole_radius"] * max(stages) + 2 * p["ring_minor"]
+    if outer > 1.6:
+        _fail(f"ring outer radius {outer:.2f} is too large for the scene (limit 1.6); reduce the hole ratio or ring_minor")
+    if p["ring_minor"] > p["pole_radius"] * 3:
+        _fail("ring_minor (tube radius) must not exceed three pole radii")
+    if min(stages) * p["pole_radius"] < p["ring_minor"] * 0.3:
+        _fail("ring hole is degenerate (smaller than a third of the tube radius)")
+
+
+def _check_cloth_objects(p, stages, shape):
+    for n in stages:
+        extent = max(max(abs(x), abs(y)) for x, y in collider_layout(n, p["spacing"])) + p["object_scale"]
+        if p["cloth_size"] < 1.6 * extent:
+            _fail(f"cloth_size {p['cloth_size']} is too small to cover {n} object(s) (needs >= {1.6 * extent:.1f}); "
+                  "increase cloth_size or reduce spacing/object_scale")
+    if p["spacing"] < 2.0 * p["object_scale"] * 1.0 and max(stages) > 1:
+        _fail(f"spacing {p['spacing']} is smaller than the object size ({2 * p['object_scale']:.1f}): objects would overlap")
+
+
 _BALL_SHAPES = ("sphere", "cube", "cylinder")
 
 TEMPLATES: dict[str, ExperimentTemplate] = {}
@@ -266,7 +318,7 @@ register(ExperimentTemplate(
     stage_param="balls", stage_def=ParamDef(None, 1, 400, kind="int"), default_stage_values=(1, 10, 50, 100),
     label="{balls} {ball_word}", label_values=_balls_label,
     hooks=("WHAT HAPPENS WHEN WE DROP {last} {things}?", "{first} {thing} VS {last} {things}", "ONE {thing} IS EASY. NOW {last}."),
-    frame_region=_balls_region,
+    frame_region=_balls_region, validate=_check_balls,
     variations={"ball_radius": (0.14, 0.34), "drop_height": (1.2, 4.0), "restitution": (0.15, 0.85),
                 "friction": (0.1, 1.2), "spread": (1.0, 2.0)},
     stage_variations=((1, 5, 25, 75), (1, 10, 50, 100), (2, 8, 32, 128), (1, 3, 9, 27, 81)),
@@ -291,7 +343,7 @@ register(ExperimentTemplate(
     label="HOLE {hole_ratio}× BALL", label_values=_funnel_label,
     hooks=("HOW SMALL CAN THE HOLE GET?", "WILL {balls} BALLS FIT THROUGH A {hole_ratio_last}× HOLE?",
            "WHEN DOES THE FLOW JAM?"),
-    frame_region=_funnel_region, camera_defaults={"elevation": 40.0},
+    frame_region=_funnel_region, validate=_check_funnel, camera_defaults={"elevation": 40.0},
     variations={"balls": (24, 70), "restitution": (0.05, 0.6), "friction": (0.1, 0.9), "ball_radius": (0.12, 0.24),
                 "funnel_height": (1.3, 2.2)},
     stage_variations=((0.9, 0.6, 0.42, 0.3), (1.0, 0.7, 0.5, 0.36), (0.8, 0.55, 0.4, 0.28, 0.22)),
@@ -316,7 +368,7 @@ register(ExperimentTemplate(
     label="HOLE {hole_ratio}× POLE", label_values=_ring_label,
     hooks=("WHAT HAPPENS WHEN THE RING GETS SMALLER?", "WILL THE RING STILL FIT THE POLE?",
            "{rings} {ring_word}. ONE POLE. HOW SMALL CAN THE HOLE GO?"),
-    frame_region=_ring_region,
+    frame_region=_ring_region, validate=_check_rings,
     variations={"rings": (2, 6), "drop_height": (0.6, 2.0), "tilt_degrees": (0.0, 20.0), "restitution": (0.05, 0.5),
                 "friction": (0.2, 1.0), "pole_height": (1.2, 2.4)},
     stage_variations=((2.5, 1.5, 1.15, 0.85), (3.0, 1.8, 1.3, 1.05, 0.8), (2.0, 1.4, 1.1, 0.9)),
@@ -337,7 +389,7 @@ register(ExperimentTemplate(
     stage_param="objects", stage_def=ParamDef(None, 1, 6, kind="int"), default_stage_values=(1, 2, 3, 4),
     label="{objects} {object_word}", label_values=_objects_label,
     hooks=("WHAT HAPPENS WHEN THE CLOTH MEETS {last} OBJECTS?", "{first} OBJECT VS {last} OBJECTS", "WHICH SHAPE DOES THE CLOTH FIND?"),
-    frame_region=_objects_region,
+    frame_region=_objects_region, validate=_check_cloth_objects,
     variations={"cloth_size": (5.0, 7.6), "drop_height": (0.6, 2.0), "object_scale": (0.6, 1.0), "spacing": (2.0, 2.8)},
     stage_variations=((1, 2, 3, 4), (1, 2, 4), (2, 3, 4, 5)),
     events="cloth", stage_meaning="number of objects the cloth falls on",

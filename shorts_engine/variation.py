@@ -64,6 +64,17 @@ class Variation:
                 "changed": self.changed, "stage_values": self.stage_values, "shape": self.shape}
 
 
+def _candidate(base: dict, t: ExperimentTemplate, shape: str, changed: dict, stage_values: list) -> dict:
+    cfg = copy.deepcopy(base)
+    cfg["name"] = "candidate"
+    if t.name == "cloth_drape":
+        cfg["camera"] = {}
+        cfg["hook"] = {"mode": "closeup", "seconds": 2.0, "text": ""}
+    cfg["experiment"] = {"type": t.name, "object": shape, "params": changed}
+    cfg["stages"] = [{"params": {t.stage_param: v}} for v in stage_values]
+    return cfg
+
+
 def _sig(x: float, digits: int = 3) -> float:
     return float(f"{x:.{digits}g}")
 
@@ -151,6 +162,10 @@ def generate_variations(experiment: str, count: int, master_seed: int = 0, prese
             params = {n: t.params[n].default for n in t.variations}
             params.update(changed)
             vec = _vector(t, params, stage_idx, shape)
+            try:                                                    # skip physically broken combinations
+                from_dict(_candidate(base, t, shape, changed, stage_values))
+            except ConfigError:
+                continue
             if all(distance(vec, o.vector) >= threshold for o in [*out, *[Variation('', 0, 0, '', {}, {}, [], '', v) for v in (avoid or [])]]):
                 accepted = (changed, stage_values, shape, vec)
                 break

@@ -182,7 +182,7 @@ try:
     if head != SHA:
         fail(f"checked-out commit {head} != requested {SHA}")
     info["checked_out"] = head
-    if not (repo / CONFIG).is_file():
+    if not BATCH and not (repo / CONFIG).is_file():
         fail(f"config missing at that commit: {CONFIG}")
 
     # 3. Setup: bpy + ffmpeg. The last line printed is ENGINE_PYTHON=<interpreter>.

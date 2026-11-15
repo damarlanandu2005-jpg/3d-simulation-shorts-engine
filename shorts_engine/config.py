@@ -313,9 +313,11 @@ class ExperimentConfig(Config):
             raise ConfigError("stages must contain at least one stage")
         if self.shape not in t.objects:
             raise ConfigError(f"experiment.object {self.shape!r} is not valid for {t.name}; allowed: {list(t.objects)}")
-        t.resolve_params(self.params)
+        resolved = t.resolve_params(self.params)
         for i, v in enumerate(self.stage_values):
             t.check_stage_value(v, f"stages[{i}].params.{t.stage_param}")
+        if t.validate is not None:                      # cross-parameter checks: reject broken scenes instead of rendering them
+            t.validate(resolved, list(self.stage_values), self.shape)
         if self.camera_preset not in PRESETS + ("manual",):
             raise ConfigError(f"camera.preset must be one of {PRESETS + ('manual',)}, got {self.camera_preset!r}")
         if self.hook_window not in ("start", "end"):

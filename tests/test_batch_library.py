@@ -199,3 +199,21 @@ def test_library_ignores_unreadable_metadata(tmp_path):
     d = tmp_path / "v" / "x"; d.mkdir(parents=True)
     (d / "metadata.json").write_text("{broken")
     assert library.scan([tmp_path]) == []
+
+
+def test_failed_item_is_retried_with_a_safe_config_and_recovers(tmp_path):
+    vs = batch.plan_batch("multiple_balls", 2, 12)
+    m = batch.write_batch(vs, tmp_path, 12, "720p")
+    base = fake_run(tmp_path / "videos", {})
+
+    def runner(args):
+        cfg = json.loads(Path(args[1]).read_text())
+        if cfg["render"].get("samples") != 8:          # the original fails, the safe retry succeeds
+            raise RuntimeError("out of memory")
+        return base(args)
+
+    out = batch.run_batch(m, tmp_path, [], runner=runner)
+    assert [i["status"] for i in out["items"]] == ["ok", "ok"]
+    first = out["items"][0]
+    assert first["retried_with_safe_config"].endswith(".safe.json") and len(first["attempts"]) == 2
+    assert "out of memory" in first["attempts"][0]["error"]

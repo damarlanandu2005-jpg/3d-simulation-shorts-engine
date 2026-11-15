@@ -129,3 +129,9 @@ def test_queue_timeout(monkeypatch):
     monkeypatch.setattr(ka.time, "sleep", lambda s: None)
     with pytest.raises(ka.AutomationError, match="still QUEUED"):
         ka.wait("u/k", timeout_s=100, interval_s=0, max_queue_s=0.0001)
+
+
+def test_kernel_keeps_work_dir_small():
+    src = ka.build_kernel_script("baseline", SHA)
+    assert 'repo = BUILD / "repo"' in src and "/tmp/se_build" in src
+    assert 'WORK / "repo"' not in src

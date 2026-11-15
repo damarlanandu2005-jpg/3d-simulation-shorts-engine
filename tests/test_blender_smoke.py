@@ -137,3 +137,23 @@ def test_camera_and_label_edits_apply_at_render_time(cfg_path, tmp_path):
     frame.unlink()
     _run(cfg_path, "--stage", "0", "--mode", "render", "--frame-start", "6", "--frame-end", "6")
     assert frame.read_bytes() != after_camera
+
+
+def test_events_mode_detects_the_cloth_hitting_the_sphere(tmp_path):
+    """Bake a tiny stage, then read the physical events from the baked cache (no physics/render changes)."""
+    cfg = {"name": "ev", "fps": 24, "duration": 3, "resolutions": [64],
+           "output": {"dir": str(tmp_path), "width": 64, "height": 128},
+           "camera": {"per_stage": []}, "video": {"hook": {"mode": "none"}},
+           "audio": {"enabled": True, "sfx_enabled": True}}
+    path = tmp_path / "ev.json"
+    path.write_text(json.dumps(cfg))
+    _run(path, "--stage", "0", "--mode", "build")
+    (m,) = _run(path, "--stage", "0", "--mode", "events")
+    assert m["kind"] == "events" and m["events"] >= 1
+    data = json.loads(next(tmp_path.rglob("events.json")).read_text())
+    first = data["events"][0]
+    assert first["type"] == "impact" and first["source"] == "Collider"
+    assert 8 < first["frame"] < 30                      # ~0.6 s free fall from 1.3 m at 24 fps
+    assert first["strength"] > 0.4
+    assert [e["frame"] for e in data["events"]] == sorted(e["frame"] for e in data["events"])
+    assert len(data["events"]) <= 6                     # a handful of events, not one per frame

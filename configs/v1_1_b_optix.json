@@ -23,5 +23,9 @@
     },
     "cards": {"enabled": false, "seconds": 0.5, "title": "×{ratio}", "subtitle": "MORE FACES", "samples": 8}
   },
-  "audio": {"enabled": true, "music": "assets/audio/default_music.wav", "volume_db": -18, "fade_in": 0.5, "fade_out": 1.0}
+  "audio": {
+    "enabled": true,
+    "music": "assets/audio/music/default_music.wav", "volume_db": -18, "fade_in": 0.5, "fade_out": 1.0,
+    "sfx_enabled": true, "sfx_volume_db": -8, "sfx_min_strength": 0.15, "sfx_min_gap": 0.15
+  }
 }

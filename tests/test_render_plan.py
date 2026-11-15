@@ -105,13 +105,14 @@ def test_cli_reports_config_errors(tmp_path, capsys):
 A_PATH = str(ROOT / "configs" / "v1_1_a_baseline.json")
 
 
-def _plan_a(cards=False, audio=True, **kw):
+def _plan_a(cards=False, audio=True, sfx=False, **kw):
     """Plan config A; `cards=True` re-enables the (optional) multiplier cards, `audio=False` drops the music."""
     import json
     from shorts_engine.config import from_dict
     data = json.loads(Path(A_PATH).read_text(encoding="utf-8"))
     data["video"]["cards"]["enabled"] = cards
     data["audio"]["enabled"] = audio
+    data["audio"]["sfx_enabled"] = sfx
     cfg = from_dict(data)
     return cfg, render.plan_jobs(cfg, A_PATH, ["blender"], True, **kw)
 

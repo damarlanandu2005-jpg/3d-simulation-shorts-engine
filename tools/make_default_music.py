@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate assets/audio/default_music.wav -- an original, seamlessly looping ambient track.
+"""Generate assets/audio/music/default_music.wav -- an original, seamlessly looping ambient track.
 
 Written for this project (no samples, no third-party music): soft sine pads on an Am-F-C-G
 progression with a slow pentatonic pluck. Deterministic. Released under CC0 1.0 (public domain).
@@ -83,4 +83,4 @@ def main(out: Path):
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "assets/audio/default_music.wav")
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "assets/audio/music/default_music.wav")

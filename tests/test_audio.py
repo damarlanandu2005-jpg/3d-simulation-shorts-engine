@@ -107,6 +107,7 @@ def test_fades_are_clamped_for_very_short_videos():
 def _plan(audio=True, music=None):
     data = json.loads(Path(A_PATH).read_text(encoding="utf-8"))
     data["audio"]["enabled"] = audio
+    data["audio"]["sfx_enabled"] = False
     if music:
         data["audio"]["music"] = music
     cfg = from_dict(data)
@@ -119,14 +120,23 @@ def test_missing_music_file_is_a_clear_error():
 
 
 def test_plan_duration_matches_frame_counts_and_music_comes_after_concat():
+    from shorts_engine import audio_mix, timeline
     cfg, jobs = _plan()
     kinds = [j.kind for j in jobs]
     assert kinds[-2:] == ["concat", "audio"]
     mix_job = jobs[-1]
+    assert mix_job.cmd[1:3] == ["-m", "shorts_engine.audio_mix"]
     # hook (60 frames of the last stage) + 4 stages * 90 frames, no cards, at 30 fps = 14 s
-    assert mix_job.cmd[mix_job.cmd.index("-t") + 1] == "14.000"
-    assert mix_job.cmd[mix_job.cmd.index("-i") + 1] == str(cfg.silent_video_path())
-    assert mix_job.cmd[-1] == str(cfg.final_video_path())
+    assert timeline.total_seconds(cfg) == pytest.approx(14.0)
+    plan = audio_mix.plan_mix(_music_only(cfg))
+    assert plan.cmd[plan.cmd.index("-t") + 1] == "14.000"
+    assert plan.cmd[plan.cmd.index("-i") + 1] == str(cfg.silent_video_path())
+    assert plan.cmd[-1] == str(cfg.final_video_path())
+
+
+def _music_only(cfg):
+    from dataclasses import replace
+    return replace(cfg, audio=replace(cfg.audio, sfx_enabled=False))
 
 
 def test_audio_config_validation():

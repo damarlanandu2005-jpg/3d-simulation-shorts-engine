@@ -126,13 +126,24 @@ class CardsCfg:
 
 @dataclass
 class AudioCfg:
-    """Background music mixed into the final MP4 by FFmpeg (the video itself is never re-encoded)."""
+    """Audio layer mixed into the final MP4 by FFmpeg (the video itself is never re-encoded).
+
+    ``enabled`` is the master switch. Background music (``music_enabled``) plays under the whole Short;
+    simulation sound effects (``sfx_enabled``) are placed at detected physical events.
+    """
 
     enabled: bool = False
-    music: str = "assets/audio/default_music.wav"  # relative paths resolve from the project root, then the cwd
-    volume_db: float = -18.0  # gain applied to the track; keep it subtle, the simulation is the star
-    fade_in: float = 0.5  # seconds
-    fade_out: float = 1.0  # seconds
+    music_enabled: bool = True
+    music: str = "assets/audio/music/default_music.wav"  # relative paths resolve from the project root, then cwd
+    volume_db: float = -18.0  # gain applied to the music; keep it subtle, the simulation is the star
+    fade_in: float = 0.5  # seconds (music only)
+    fade_out: float = 1.0
+    sfx_enabled: bool = False
+    sfx_volume_db: float = -8.0  # gain of a strength-1.0 effect; weaker events are quieter (amplitude ~ strength)
+    sfx_dir: str = "assets/audio/sfx"  # holds <sound>.wav files
+    sfx_min_strength: float = 0.15  # events weaker than this are dropped
+    sfx_min_gap: float = 0.15  # seconds; same-sound events closer than this are merged (the stronger one stays)
+    sfx_max_events: int = 24  # hard cap against sound spam (strongest events are kept)
 
 
 @dataclass
@@ -188,6 +199,12 @@ class Config:
 
     def music_path(self) -> Path:
         return resolve_asset(self.audio.music)
+
+    def stage_events_path(self, index: int) -> Path:
+        return self.stages()[index].blend_path.parent / "events.json"
+
+    def sfx_path(self, sound: str) -> Path:
+        return resolve_asset(f"{self.audio.sfx_dir}/{sound}.wav")
 
     def camera_for_stage(self, index: int) -> CameraCfg:
         """Base camera merged with this stage's optional override."""
@@ -436,12 +453,20 @@ def _validate_video(cfg: Config) -> None:
             raise ConfigError(f"video.cards.title is invalid: {exc!r}") from exc
     a = cfg.audio
     if a.enabled:
-        if not isinstance(a.music, str) or not a.music:
-            raise ConfigError("audio.music must be a file path when audio.enabled is true")
+        if a.music_enabled and (not isinstance(a.music, str) or not a.music):
+            raise ConfigError("audio.music must be a file path when audio.music_enabled is true")
         if not -60 <= a.volume_db <= 6:
             raise ConfigError("audio.volume_db must be between -60 and 6")
         if a.fade_in < 0 or a.fade_out < 0:
             raise ConfigError("audio.fade_in / audio.fade_out must be >= 0")
+        if not a.music_enabled and not a.sfx_enabled:
+            raise ConfigError("audio.enabled needs audio.music_enabled and/or audio.sfx_enabled")
+        if not -60 <= a.sfx_volume_db <= 6:
+            raise ConfigError("audio.sfx_volume_db must be between -60 and 6")
+        if not 0 <= a.sfx_min_strength <= 1:
+            raise ConfigError("audio.sfx_min_strength must be within 0..1")
+        if a.sfx_min_gap < 0 or a.sfx_max_events < 0:
+            raise ConfigError("audio.sfx_min_gap and audio.sfx_max_events must be >= 0")
 
 
 def from_dict(data: dict) -> Config:

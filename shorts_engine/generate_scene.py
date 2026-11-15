@@ -51,7 +51,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="generate_scene")
     p.add_argument("--config", required=True)
     p.add_argument("--stage", type=int, default=0, help="index into config.resolutions")
-    p.add_argument("--mode", choices=["build", "render", "all", "hook", "card"], default="all")
+    p.add_argument("--mode", choices=["build", "render", "all", "hook", "card", "events"], default="all")
     p.add_argument("--card-index", type=int, default=0, help="card mode: card shown after this stage")
     p.add_argument("--frame-start", type=int, default=None)
     p.add_argument("--frame-end", type=int, default=None)
@@ -254,6 +254,65 @@ def render_card(cfg, card_index: int) -> None:
                   card_index, 0, device, None, kind="card")
 
 
+def detect_stage_events(cfg, stage) -> None:
+    """Read the baked simulation and write ``events.json`` (physical events for the sound-effect layer).
+
+    Thin read-only layer: it steps through the baked cache, measures how close a sample of cloth vertices
+    gets to each collider, and turns approaches into events (see events.detect_contacts). Nothing about the
+    physics or the render is changed, and nothing is saved back to the .blend.
+    """
+
+    import numpy as np
+    from mathutils import bvhtree
+
+    from shorts_engine import events as ev
+
+    require_blend(stage)
+    bpy.ops.wm.open_mainfile(filepath=str(stage.blend_path.resolve()))
+    scene = bpy.context.scene
+    cloth, collider = bpy.data.objects["Cloth"], bpy.data.objects["Collider"]
+    for mod in cloth.modifiers:                      # look only at the simulated mesh, not wireframe/solidify
+        if mod.type != "CLOTH":
+            mod.show_viewport = False
+    world = collider.matrix_world
+    tree = bvhtree.BVHTree.FromPolygons([world @ v.co for v in collider.data.vertices],
+                                        [tuple(p.vertices) for p in collider.data.polygons])
+
+    t0 = time.perf_counter()
+    n = len(cloth.data.vertices)
+    sample = np.unique(np.linspace(0, n - 1, min(n, 1500)).astype(int))
+    d_collider, d_ground = [], []
+    for frame in range(1, cfg.frame_count + 1):
+        scene.frame_set(frame)
+        dg = bpy.context.evaluated_depsgraph_get()
+        mesh = cloth.evaluated_get(dg).to_mesh()
+        pts = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+        mesh.vertices.foreach_get("co", pts)
+        cloth.evaluated_get(dg).to_mesh_clear()
+        pts = pts.reshape(-1, 3)[sample]
+        d_ground.append(float(pts[:, 2].min()))
+        best = float("inf")
+        for p in pts:
+            hit = tree.find_nearest(p)
+            if hit[0] is not None:
+                best = min(best, hit[3])
+        d_collider.append(best)
+
+    # cloth rests about 2x collision_distance (+ collider thickness) away from the surface, so 'touching' is a bit above that
+    thr = cfg.physics.collision_distance * 2 + 0.03
+    ref = math.sqrt(2 * cfg.physics.gravity * max(cfg.object.cloth_drop_height, 0.1))  # free-fall speed over the drop
+    found = (ev.detect_contacts(d_collider, cfg.fps, thr, ref, "impact", "bounce", "Collider")
+             + ev.detect_contacts(d_ground, cfg.fps, thr, ref, "landing", "landing", "Ground"))
+    found.sort(key=lambda e: e.frame)
+    path = cfg.stage_events_path(stage.index)
+    ev.save_events(path, found, cfg.fps, stage.index,
+                   {"threshold": round(thr, 4), "ref_speed": round(ref, 3),
+                    "collider_distance": [round(d, 4) for d in d_collider],
+                    "ground_distance": [round(d, 4) for d in d_ground]})
+    metric(kind="events", stage=stage.index, faces=stage.faces, events=len(found),
+           seconds=round(time.perf_counter() - t0, 2), path=str(path))
+
+
 def main(argv=None) -> None:
     args = parse_args(argv)
     cfg = load_config(args.config)
@@ -269,6 +328,8 @@ def main(argv=None) -> None:
         render_stage(cfg, stage, args.frame_start, args.frame_end)
     if args.mode == "hook":
         render_hook(cfg, stage)
+    if args.mode == "events":
+        detect_stage_events(cfg, stage)
 
 
 if __name__ == "__main__":

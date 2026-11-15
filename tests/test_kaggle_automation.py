@@ -276,7 +276,6 @@ def test_workflow_inputs_are_validated_and_secrets_stay_in_env():
 
 
 def test_batch_kernel_does_not_require_a_config_file():
-    import kaggle.kaggle_automation as ka
     script = ka.build_kernel_script("baseline", "a" * 40, None, {"experiment": "auto", "variations": 2, "seed": 1, "preset": "720p"})
     assert "if not BATCH and not (repo / CONFIG).is_file()" in script
     compile(script, "kernel.py", "exec")

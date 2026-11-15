@@ -45,7 +45,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Kaggle CLI
-        run: python -m pip install --quiet --upgrade kaggle pytest
+        run: python -m pip install --quiet --upgrade kaggle six pytest
 
       - name: Unit tests for the automation helper
         run: python -m pytest -q tests/test_kaggle_automation.py

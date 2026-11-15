@@ -106,6 +106,18 @@ jobs:
           python kaggle/kaggle_automation.py verify --test-config "$TEST_CONFIG" --dir "$DIR"
           echo "RESULT_DIR=$DIR" >> "$GITHUB_ENV"
 
+      - name: Show benchmark summary (also in the run summary page)
+        run: |
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os
+          d = os.environ["RESULT_DIR"]
+          info = json.load(open(f"{d}/run_info.json"))
+          b = json.load(open(f"{d}/benchmark.json"))
+          print(f"### kaggle-gpu-test: {info.get('test_config')} @ {info.get('commit', '')[:7]}")
+          print("run_info:", json.dumps({k: info.get(k) for k in ("gpu", "bpy", "wall_seconds", "video_bytes", "status")}))
+          print("summary:", json.dumps(b.get("summary"), indent=1))
+          PY
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:

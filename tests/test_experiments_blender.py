@@ -209,3 +209,23 @@ def test_pipeline_writes_metadata_benchmark_and_a_passing_qc_report(tmp_path):
     assert qc["passed"], [c for c in qc["checks"] if not c["ok"]]
     meta = json.loads((root / "metadata.json").read_text())
     assert meta["experiment"] == "ball_funnel" and meta["resolution"] == "90x160" and meta["experiment_config"]["stages"]
+
+
+@pytest.mark.parametrize("exp,obj,stages,params", [
+    ("multiple_balls", "sphere", [1, 8], {}),
+    ("ball_funnel", "sphere", [0.8, 0.4], {"balls": 12}),
+    ("ring_toss", "torus", [2.0, 0.9], {"rings": 2}),
+    ("cloth_objects", "torus", [1, 2], {"faces": 256}),
+])
+def test_every_new_experiment_runs_the_whole_pipeline_and_passes_qc(tmp_path, exp, obj, stages, params):
+    """config -> bake -> render -> events -> hook -> assemble -> music + SFX -> QC, for each registered experiment."""
+    import shutil
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        pytest.skip("ffmpeg/ffprobe not installed")
+    from shorts_engine import render
+    cfg = write_cfg(tmp_path, exp, obj, stages, params=params, name=f"e2e_{exp}", duration=1.0, fps=24)
+    assert render.main(["--config", str(cfg), "--use-bpy"]) == 0
+    root = tmp_path / f"e2e_{exp}"
+    qc = json.loads((root / "qc_report.json").read_text())
+    assert qc["passed"], [c for c in qc["checks"] if not c["ok"]]
+    assert json.loads((root / "audio_timeline.json").read_text())["sfx"], "events produced sound effects"

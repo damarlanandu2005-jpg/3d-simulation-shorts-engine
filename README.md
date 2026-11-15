@@ -13,6 +13,97 @@ so changing the object, resolutions, physics, camera or label does not need code
 
 Not in V1 (on purpose): AI agents, Ollama, YouTube upload, a render farm, audio.
 
+## SimMorph: the physics experiment generator (Phases 3-13)
+
+The same pipeline (Blender physics bake -> Cycles render -> FFmpeg -> music + physics SFX -> quality check) now
+drives several experiments. An experiment is a *template* (`shorts_engine/templates.py`): parameters with valid
+ranges, the stage progression, labels, hook questions, camera framing, plus a Blender scene builder
+(`shorts_engine/simulation.py`). Nothing else is duplicated. An experiment is registered only after it has run in
+real Blender (`tests/test_experiments_blender.py`).
+
+| experiment | physics | stage progression | hook examples |
+| --- | --- | --- | --- |
+| `cloth_drape` (V1.1 reference, frozen) | Blender cloth | mesh resolution 64 -> 16384 faces | "WHAT HAPPENS WHEN WE ADD 256x MORE FACES?" |
+| `multiple_balls` | rigid bodies (sphere / cube / cylinder) in an arena | 1 -> 10 -> 50 -> 100 objects | "WHAT HAPPENS WHEN WE DROP 100 BALLS?" |
+| `ball_funnel` | rigid bodies through a funnel | hole 5x -> 1.7x ball size (jams) | "HOW SMALL CAN THE HOLE GET?" |
+| `ring_toss` | rigid-body torus rings over a pole | ring hole 2.5x -> 0.85x pole radius | "WHAT HAPPENS WHEN THE RING GETS SMALLER?" |
+| `cloth_objects` | cloth over several objects (spheres, cubes, rings...) | 1 -> 4 objects | "WHAT HAPPENS WHEN THE CLOTH MEETS 4 OBJECTS?" |
+
+`python -m shorts_engine.library experiments` lists them; `python -m shorts_engine.experiment list` shows parameters.
+
+### Configuration (schema v2, see also "Experiment configuration" below)
+
+```json
+{ "schema_version": 2, "name": "balls_demo", "seed": 3,
+  "experiment": {"type": "multiple_balls", "object": "sphere", "params": {"restitution": 0.7, "drop_height": 3.0}},
+  "simulation": {"fps": 30, "duration": 3.0},
+  "stages": [{"params": {"balls": 1}}, {"params": {"balls": 10}}, {"params": {"balls": 100}, "camera": {"distance": 15}}],
+  "camera": {"preset": "wide", "motion": "push_in"},
+  "hook": {"mode": "closeup", "seconds": 2.0, "window": "start", "text": "auto"},
+  "render": {"samples": 16, "denoise": false}, "output": {"width": 720, "height": 1280},
+  "audio": {"enabled": true, "music_enabled": true, "sfx_enabled": true} }
+```
+
+Examples: `configs/experiments/*.json`. Old flat configs (`configs/v1_1_a_baseline.json`) still work unchanged.
+
+* **Stages** carry the experiment's own parameter (`balls`, `hole_radius`, `hole_ratio`, `objects`, `faces`) and an
+  optional camera override. Labels come from the template (`"{balls} {ball_word}"`) or `label.template`.
+* **Hooks**: `hook.text` may use `{first} {last} {total_ratio} {things}` and any experiment parameter, or `"auto"`
+  (a template question chosen by the seed). `hook.window` picks which part of the last stage is replayed (`start` = the
+  action for rigid bodies, `end` = the settled cloth).
+* **Camera**: `preset` = `wide | close | top | side` (distance/height are *computed* so the experiment's region is
+  never clipped; verified by projecting the region corners) or `manual`; `motion` = `static | push_in | follow | impact`.
+* **Audio**: music + SFX as before. Events come from the simulation: cloth contact distances (cloth experiments) or
+  velocity impulses of every rigid body (`events.detect_impulses`: bounce, landing, ball-ball/wall/funnel collisions),
+  so many simultaneous impacts become a bounded set of cues (`sfx_max_events`).
+* **Presets**: `720p` is the fast production/testing preset, `1080p` the quality preset. No-denoise is the default;
+  OptiX denoising is never required (it failed on the tested Kaggle T4).
+
+### Run locally
+
+```
+pip install -r requirements.txt                      # bpy 4.5 needs Python 3.11; FFmpeg on PATH
+python -m shorts_engine.render --config configs/experiments/multiple_balls_100.json --use-bpy
+# -> output/multiple_balls_100/multiple_balls_100.mp4 + benchmark.json + metadata.json + qc_report.json
+```
+
+### Batch generation
+
+```
+python -m shorts_engine.batch --experiment multiple_balls --variations 10 --seed auto --out output/batches --run --use-bpy
+python -m shorts_engine.batch --experiment auto --variations 8 --out output/batches        # configs + manifest only
+```
+
+Each video gets a unique name, seed and config (`<experiment>_s<seed>_<index>`), a *physical* variation record (object
+count/size, bounciness, friction, drop height, hole size, shape, stage progression, mesh density - never just a colour;
+`shorts_engine/variation.py`), a benchmark, metadata and a QC report. `auto` balances experiment types and stays
+physically far from videos already in the library (`diversity.py`, `library.py`). One failing video never stops the
+batch; finished identical videos are skipped on re-run; a different config is never overwritten.
+`python -m shorts_engine.library index output/batches` builds `library.json`.
+
+### Quality control
+
+`render` runs `shorts_engine/qc.py` after every full render (also `python -m shorts_engine.qc --config CFG`): video
+exists, valid H.264 stream, resolution, 9:16 aspect, fps, duration vs the planned timeline, every frame present,
+clean decode, audio stream when enabled, audio/video duration match, benchmark.json and metadata.json. Exit code 3 on failure.
+
+### Run through Kaggle
+
+Actions > `kaggle-gpu-test` > Run workflow, branch `v1.1`. `test_config` = `baseline | optix | 1080p` (V1.1, unchanged)
+or `multiple_balls | ball_funnel | ring_toss | cloth_objects`; optional `config_path` (a validated
+`configs/**.json`); or batch mode: `batch_variations` (1-12), `batch_experiment`, `batch_seed`, `preset`.
+Secrets stay `KAGGLE_USERNAME` / `KAGGLE_API_TOKEN` (via env only; never in the kernel or the logs).
+
+### Limitations
+
+* Rigid-body experiments use Blender's Bullet engine, baked once to keyframes; there is no initial-velocity
+  parameter (drop height is the energy knob) and no fluid/particle experiment.
+* Ring and funnel meshes use Bullet's triangle-mesh shape; very thin or very fast objects can tunnel (the defaults and
+  ranges were chosen so they do not; substeps are raised for rings).
+* Multiplier cards exist only for `cloth_drape`. Labels are template-based (no per-stage free text).
+* `follow` camera tracks the centroid of balls/rings only; the closeup hook for rigid bodies replays the first seconds.
+* Automatic YouTube/Instagram upload, AI/LLM generation and agents are deliberately not built (Phase 14).
+
 ## Requirements
 
 - Python 3.11 (needed for the `bpy` module) **or** a normal Blender 4.5 LTS install

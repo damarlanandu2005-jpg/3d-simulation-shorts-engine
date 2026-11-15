@@ -17,6 +17,10 @@ Because Blender is GPL, any `.blend` *scripts* that import `bpy` are normally tr
 add-on/script code. This repository is therefore best kept GPL-compatible. **The repository owner has
 not chosen a license for this project yet: add a `LICENSE` file before sharing it publicly.**
 
+Phases 3-13 (experiment templates, rigid-body scenes, variation/batch/QC/library, Kaggle generalisation) added
+**no third-party code or assets and no new dependencies**: physics is Blender's built-in rigid body (Bullet) and cloth,
+tests use only NumPy (already required by `bpy`) and FFmpeg/ffprobe.
+
 ## Projects reviewed but NOT incorporated
 
 These were evaluated during planning. Nothing from them was copied. Entries marked "reference only"

@@ -1,0 +1,116 @@
+name: kaggle-gpu-test
+
+# Manual only. Launches ONE private Kaggle GPU kernel that clones this exact commit, renders one of
+# three fixed V1.1 configs, then downloads the mp4 + benchmark.json as workflow artifacts.
+# Run Actions > kaggle-auth-check first.
+on:
+  workflow_dispatch:
+    inputs:
+      test_config:
+        description: Which V1.1 test to render on a Kaggle GPU
+        type: choice
+        required: true
+        default: baseline
+        options:
+          - baseline # configs/v1_1_a_baseline.json  720x1280, 16 spp, no denoise
+          - optix    # configs/v1_1_b_optix.json      720x1280, 16 spp, OptiX denoise
+          - 1080p    # configs/v1_1_c_1080p.json      1080x1920, 16 spp, no denoise
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-gpu-test
+  cancel-in-progress: false
+
+jobs:
+  gpu-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      TEST_CONFIG: ${{ inputs.test_config }}
+      COMMIT_SHA: ${{ github.sha }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the V1.1 code (choose branch v1.1 in "Use workflow from")
+        run: |
+          [ -f kaggle/kaggle_automation.py ] || { echo "::error::kaggle/kaggle_automation.py not found on this ref. Re-run and select branch v1.1 under 'Use workflow from'."; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --quiet --upgrade kaggle pytest
+
+      - name: Unit tests for the automation helper
+        run: python -m pytest -q tests/test_kaggle_automation.py
+
+      - name: Fail early if secrets or auth are bad
+        run: |
+          [ -n "$KAGGLE_USERNAME" ] || { echo "::error::KAGGLE_USERNAME secret missing"; exit 1; }
+          [ -n "$KAGGLE_API_TOKEN" ] || { echo "::error::KAGGLE_API_TOKEN secret missing"; exit 1; }
+          kaggle datasets list --page-size 1 > /dev/null || { echo "::error::Kaggle auth failed"; exit 1; }
+          echo "Kaggle auth OK"
+
+      - name: Prepare kernel (fixed config mapping, pinned commit)
+        id: prep
+        run: |
+          KERNEL=$(python kaggle/kaggle_automation.py prepare \
+            --test-config "$TEST_CONFIG" --sha "$COMMIT_SHA" \
+            --username "$KAGGLE_USERNAME" --run-id "$RUN_ID" --out kaggle_job)
+          echo "kernel=$KERNEL" >> "$GITHUB_OUTPUT"
+          echo "Prepared $KERNEL for commit $COMMIT_SHA, test_config=$TEST_CONFIG"
+
+      - name: Push kernel to Kaggle (starts the GPU run)
+        env:
+          KERNEL: ${{ steps.prep.outputs.kernel }}
+        run: |
+          set -o pipefail
+          kaggle kernels push -p kaggle_job --accelerator NvidiaTeslaT4 2>&1 | tee push.log
+          if grep -qi "error" push.log; then
+            echo "::error::kaggle kernels push reported an error"; exit 1
+          fi
+          echo "Kernel pushed: https://www.kaggle.com/code/$KERNEL"
+
+      - name: Wait for the kernel to finish
+        env:
+          KERNEL: ${{ steps.prep.outputs.kernel }}
+        run: python kaggle/kaggle_automation.py wait --kernel "$KERNEL" --timeout 12600 --interval 60
+
+      - name: Download kernel output (also when the run failed, for diagnosis)
+        if: always() && steps.prep.outputs.kernel != ''
+        env:
+          KERNEL: ${{ steps.prep.outputs.kernel }}
+        run: |
+          mkdir -p kaggle_out
+          kaggle kernels output "$KERNEL" -p kaggle_out -o || echo "::warning::could not download kernel output"
+          find kaggle_out -type f | head -50
+
+      - name: Verify mp4, benchmark.json and run_info.json
+        run: |
+          # kernel writes /kaggle/working/result/*; the CLI may keep that subfolder
+          DIR=kaggle_out; [ -d kaggle_out/result ] && DIR=kaggle_out/result
+          python kaggle/kaggle_automation.py verify --test-config "$TEST_CONFIG" --dir "$DIR"
+          echo "RESULT_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-${{ inputs.test_config }}-${{ github.run_id }}
+          path: ${{ env.RESULT_DIR }}
+          if-no-files-found: error
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-${{ inputs.test_config }}-${{ github.run_id }}-diagnostics
+          path: |
+            kaggle_out
+            push.log
+          if-no-files-found: ignore

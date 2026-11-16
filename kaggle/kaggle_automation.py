@@ -50,7 +50,7 @@ MAX_BATCH_VARIATIONS = 12      # keeps a batch inside a Kaggle session (a 720p v
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 ACCELERATOR = "NvidiaTeslaT4"  # default; passed to `kaggle kernels push --accelerator`
-ACCELERATORS = ("NvidiaTeslaT4", "NvidiaL4", "default")  # "default" = request a GPU, let Kaggle choose
+ACCELERATORS = ("NvidiaTeslaT4", "NvidiaTeslaP100", "NvidiaL4", "default")  # "default" = request a GPU, let Kaggle choose
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 USER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 RUN_RE = re.compile(r"^[0-9]{1,20}$")

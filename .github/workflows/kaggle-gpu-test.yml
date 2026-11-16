@@ -66,6 +66,7 @@ on:
         default: NvidiaTeslaT4
         options:
           - NvidiaTeslaT4
+          - NvidiaTeslaP100
           - NvidiaL4
           - default # no specific GPU; Kaggle picks one
 

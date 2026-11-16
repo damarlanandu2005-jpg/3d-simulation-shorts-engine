@@ -4,16 +4,21 @@ Date: 2026-11-16 · Branch `v1.1` · Status: research document, no engine change
 
 ## 0. Read this first: limits of the research
 
-This document is honest about what could and could not be done.
+Two passes were made. The first (search only) found almost nothing. The second used the built-in browser and is the basis for Section 2A.
 
-- **I did not watch any competitor video.** Claude in Chrome was not connected, and YouTube blocked every automated route available to me (RSS feeds and Shorts tabs returned `robots_disallowed`; the ShortForm3D channel page failed; fetched video pages carried no view or duration data).
-- **None of the five named channels' individual videos could be retrieved.** Web searches for Rolling Qub, 3D 4FUN, Blop Blop, ShortForm3D and Kinetic Garden returned no pages about those channels or their videos. Search results were dominated by unrelated pages.
-- **The "at least 20 videos" target is not met.** Section 2 lists only the items that the searches actually surfaced (about a dozen), each labelled as title/snippet-only. I have not padded it with invented entries.
-- **No view counts or durations are verified for any named channel.** The only figures that appear are ones found in search snippets, quoted with their source and flagged as unverified aggregator data.
-- Everything in the creative-pattern sections (3, 4) is therefore a **hypothesis built from titles, snippets and general knowledge of the genre**, not an observation of specific videos. Observed facts and hypotheses are marked separately.
-- Sections 5 onward (SimMorph comparison, concepts, feasibility) rest on our own repository and videos and are first-hand, except where marked.
+**What was actually observed (2026-11-16, built-in browser, signed out):**
+- Channel pages and the Popular Shorts grids of Rolling Qub, 3D 4FUN, Blop Blop and Kinetic Garden: subscriber counts, video counts, titles, and view counts where the grid showed them.
+- One Short (Rolling Qub, "Thick glass layer vs Steel ball simulation") opened and sampled with a few screenshots.
 
-**To close the gap:** give me 20 to 30 specific video URLs (or short screen recordings) and, ideally, a connected browser. Sections 2 to 4 can then be redone from real observation without changing the rest of this document.
+**What was not done:**
+- **I did not properly watch 20 videos.** Only one Short was opened, and only three frames were sampled (two with content, one black). I can describe those frames, not the full video, its audio, its loop, or its duration.
+- **ShortForm3D returned HTTP 404** for `@ShortForm3D`. The handle may be wrong or removed; nothing was observed for it.
+- **The 20-video target is not met.** Section 2A has 9 grid-level entries with titles/views plus thumbnails; Section 2 keeps the 14 snippet-only items from the first pass.
+- Thumbnails show a single frame; "observed" below means that frame or the grid text, nothing more.
+- Pattern analysis (Sections 3 and 4) is hypothesis supported by Section 2A, not a study of full videos.
+- View counts are public counts at one moment and do not prove why a video worked.
+
+**To close the gap:** pick or approve 20 to 30 specific Shorts to open and sample properly (several frames each, with audio not assessable by me), or share screen recordings.
 
 ## 1. Scope and method
 
@@ -40,14 +45,42 @@ Columns the brief asked for (duration, hook, camera, lighting, sound, loop techn
 | 13 | DoodleChaos (Patreon) | Impossible Piano Physics Simulation – In the Hall of the Mountain King | Patreon post title, 2022-04-28 | Physics sim set to a known track | Music-synced physics is a distinct format; copyrighted music is a risk for us |
 | 14 | Two Minute Papers (via rosetta.to) | This Isn't AI - It's Even Wilder: Squishy Physics That Learn to Move! | Aggregator shows 5m 4s, 60K views | Research-explainer, not a Shorts-style clip | Not a direct competitor |
 
-None of these rows is from Rolling Qub, 3D 4FUN, Blop Blop, ShortForm3D or Kinetic Garden.
+None of these rows is from the five named channels; those are in Section 2A.
+
+## 2A. Observed channel pages and popular Shorts (built-in browser)
+
+| Channel | Observed profile | Popular-grid items (title as shown, views if visible) |
+|---|---|---|
+| Rolling Qub (`@RollingQub`) | 12.8K subscribers, 75 videos, "3D Artist" | "Thick glass layer vs Steel ball simulation #3danimation #satisfying #asmr", 3.9M views, 27K likes, 20 comments; "0%-100% Soft body simulation ...", 3.1M (two entries, 3.1M each); thumbnails labelled "10,000 Kg" (steel ball on a pyramid), "10,000 Balls" (balls under a press on a tray), "1,000 Kg" (rainbow block pyramid, ball) with views not captured |
+| 3D 4FUN (`@3d4func4d`) | 70.9K subscribers, 417 videos | "0% vs 100% Magnetic Pressure ...", 12M views; "Cloth vs Cone | Cloth Simulation in Cinema...", 11M; "1 vs 10000 KG Heavy ball simulation #c4d ...", 8.7M; thumbnails seen without views: red object labelled "PRESSURE 10" between metal blocks, a blue ball on a chain over a cone, a chocolate drop |
+| Blop Blop (`@BlopBlop-YT`) | 2.88K subscribers, 28 videos, "Satisfying 3D loop cube animations" | Latest grid shows tiled cube patterns in purple/orange and green/red; popular views not captured |
+| Kinetic Garden (`@KineticGarden`) | 403 subscribers, 135 videos, "Satisfying physics experiments, simulated in 3D" | Latest grid shows blue particles on green, a Rubik-like cube stack on tiles, a yellow tile pattern; popular views not captured |
+| ShortForm3D | HTTP 404 | Nothing observed |
+
+**One Short sampled (Rolling Qub, glass layers vs steel ball).** Observed frames:
+- about 1 s: on-screen counter reads "1 Kg", a steel ball floats above five stacked translucent glass sheets (teal to magenta), pale lavender studio gradient, soft reflections;
+- about 5 s: counter reads "25 Kg", same scene;
+- about 10 s and 16 s: black frame (playback ended or stalled; I cannot tell which).
+I did not see the glass break, hear the audio, or measure the duration.
+
+**Observed facts across the grid (first-hand):**
+1. The highest-viewed items on both Rolling Qub and 3D 4FUN are **numeric-ramp experiments**: "0%-100%", "1 vs 10000 KG", "10,000 Kg", "0% vs 100%". A counter in the frame is the escalation device.
+2. Glossy hero materials (steel, glass, chocolate, cloth) on soft studio gradients are the norm.
+3. Top view counts range from 3.1M to 12M on channels with 12.8K and 70.9K subscribers, so reach is not tied to subscriber count.
+4. Blop Blop and Kinetic Garden are much smaller (2.88K, 403 subscribers) and use procedural or particle patterns more than a question-led setup.
+5. Titles combine a comparison ("X vs Y") with hashtags such as #satisfying and #asmr.
+
+**Hypotheses (not observed):** the counter-driven escalation is the reason these items travel; the sound is designed (the tags say ASMR); endings loop.
+
+**Implication for SimMorph:** our "escalation" idea is the same device the leaders use. Copying numeric ramps would make SimMorph a clone. The differentiator should be the **question and the real, surprising physics outcome** (a wrong guess the viewer can check), not a bigger number.
 
 ## 3. Creative formats (hypotheses from titles and genre knowledge)
 
-Formats I can name and what supports each. **Evidence strength is low throughout** because no videos were observed.
+Formats I can name and what supports each. Evidence is strongest for the numeric-ramp format (observed grids) and weak for the rest (titles only).
 
 | Format | Supported by | Repeats in the material I saw? | Performance evidence |
 |---|---|---|---|
+| Numeric-ramp experiment (kg, %, counts) | Section 2A grids, observed | Yes, repeatedly on two channels | 3.1M to 12M views on individual Shorts (public counts, one moment) |
 | Compilation / showcase | Many titles above | Yes, very often | Only an unverified 312,987-view aggregator figure |
 | Destruction / earthquake | Reddit 100k-subscriber note | Yes | Weak (one forum claim) |
 | Soft-body / ASMR sound | Jelly-cube and gold-cube articles | Yes | News coverage, no counts |
@@ -703,8 +736,8 @@ Do not fake: tablecloth pull needs two-way cloth-rigid coupling we do not have; 
 - https://rosetta.to/u/twominutepapers/this-isn-t-ai-it-s-even-wilder-squishy-physics-that-learn-to-move
 - https://www.tubefilter.com/?p=158090
 
-The five channel URLs given in the brief were attempted and are listed here for completeness: https://www.youtube.com/@rollingqub, https://www.youtube.com/@3d4func4d, https://www.youtube.com/@blopblop-yt, https://www.youtube.com/@ShortForm3D, https://www.youtube.com/@KineticGarden. No data was retrieved from any of them.
+The five channel URLs given in the brief were attempted and are listed here for completeness: https://www.youtube.com/@rollingqub, https://www.youtube.com/@3d4func4d, https://www.youtube.com/@blopblop-yt, https://www.youtube.com/@ShortForm3D, https://www.youtube.com/@KineticGarden. Four loaded in the built-in browser (grid-level observation only); ShortForm3D returned 404.
 
 ## 13. Limitations (summary)
 
-No playback; no verified views or durations for the named channels; fewer than 20 videos identified; patterns are hypotheses; concept scores are my judgment; feasibility is from reading the repo, not from prototyping.
+One Short sampled with three frames; grids read for four of five channels; ShortForm3D 404; fewer than 20 videos examined; no audio, durations or loop behaviour verified; patterns are hypotheses; concept scores are my judgment; feasibility is from reading the repo, not prototyping.

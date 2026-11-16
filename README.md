@@ -466,3 +466,10 @@ See `docs/DESIGN_CHECKLIST.md` for the design rules.
 - **Curated batches:** put hand-designed configs in `configs/curated/` and run
   `python -m shorts_engine.batch --curated configs/curated --seed 1 --run --use-bpy`, or dispatch the Kaggle workflow with
   `batch_experiment=curated`. Same manifest, QC, no-overwrite and safe-config retry as generated batches.
+
+## Verified Kaggle curated batch (V1.2, 720x1280, 24 spp)
+
+GitHub Actions run 43820827640 (artifact `kaggle-baseline-43820827640`, `result/<name>/`): 6 of 6 videos rendered and passed QC
+(h264 + aac, 16.4-19 s, 43 MB total, 6923 s wall). Kaggle reported 2x Tesla T4 even though NvidiaTeslaP100 was requested.
+balls_100_drop, funnel_tiny_hole, funnel_heavy_pour, rings_shrinking_hole, cloth_five_objects (five-stage stories) and
+cloth_density_escalation (four stages, golden V1 look).

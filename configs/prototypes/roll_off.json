@@ -1,0 +1,52 @@
+{
+ "schema_version": 2,
+ "name": "proto_roll_off",
+ "seed": 3,
+ "experiment": {
+  "type": "roll_off",
+  "params": {}
+ },
+ "simulation": {
+  "fps": 30,
+  "duration": 7.0,
+  "payoff_duration": 7.0
+ },
+ "stages": [
+  {
+   "params": {
+    "incline": 14
+   }
+  },
+  {
+   "params": {
+    "incline": 18,
+    "ramp_friction": 0.0,
+    "friction": 0.0
+   }
+  }
+ ],
+ "camera": {
+  "preset": "wide",
+  "motion": "static"
+ },
+ "render": {
+  "samples": 32,
+  "denoise": false
+ },
+ "output": {
+  "width": 720,
+  "height": 1280,
+  "dir": "output"
+ },
+ "audio": {
+  "enabled": true,
+  "music_enabled": true,
+  "sfx_enabled": true
+ },
+ "hook": {
+  "mode": "none"
+ },
+ "label": {
+  "size": 0.15
+ }
+}

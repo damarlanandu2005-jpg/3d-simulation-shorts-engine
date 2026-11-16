@@ -46,6 +46,7 @@ EXPERIMENT_CONFIGS = {
 ALL_CONFIGS = {**CONFIGS, **EXPERIMENT_CONFIGS}
 CONFIG_PATH_RE = re.compile(r"^configs/[A-Za-z0-9_][A-Za-z0-9_./-]{0,120}\.json$")
 PRESETS = ("720p", "1080p")
+CURATED_DIRS = {"curated": "configs/curated", "prototypes": "configs/prototypes"}
 MAX_BATCH_VARIATIONS = 12      # keeps a batch inside a Kaggle session (a 720p video takes ~15-25 min on a T4)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -101,12 +102,12 @@ def validate_batch(experiment: str, variations, seed, preset: str, root: Path = 
         from shorts_engine.templates import TEMPLATES
     finally:
         sys.path.remove(str(root))
-    if experiment == "curated":                       # the hand-designed configs committed in configs/curated/
+    if experiment in CURATED_DIRS:                    # hand-designed configs committed in configs/curated/ or configs/prototypes/
         if not 0 <= int(seed) <= 999_999:
             raise AutomationError("batch seed must be between 0 and 999999")
-        if not any((root / "configs" / "curated").glob("*.json")):
-            raise AutomationError("no configs/curated/*.json in this checkout")
-        return {"experiment": "curated", "variations": 1, "seed": int(seed), "preset": preset}
+        if not any((root / CURATED_DIRS[experiment]).glob("*.json")):
+            raise AutomationError(f"no {CURATED_DIRS[experiment]}/*.json in this checkout")
+        return {"experiment": experiment, "variations": 1, "seed": int(seed), "preset": preset}
     if experiment != "auto" and experiment not in TEMPLATES:
         raise AutomationError(f"batch experiment must be 'auto' or one of {sorted(TEMPLATES)}, got {experiment!r}")
     try:
@@ -219,8 +220,8 @@ try:
     if BATCH is None:
         cmd = [py, "-m", "shorts_engine.render", "--config", CONFIG, "--use-bpy"]
     else:
-        if BATCH["experiment"] == "curated":
-            cmd = [py, "-m", "shorts_engine.batch", "--curated", "configs/curated", "--seed", str(BATCH["seed"]),
+        if BATCH["experiment"] in ("curated", "prototypes"):
+            cmd = [py, "-m", "shorts_engine.batch", "--curated", "configs/" + BATCH["experiment"], "--seed", str(BATCH["seed"]),
                    "--out", "output/batches", "--run", "--use-bpy"]
         else:
             cmd = [py, "-m", "shorts_engine.batch", "--experiment", BATCH["experiment"], "--variations", str(BATCH["variations"]),

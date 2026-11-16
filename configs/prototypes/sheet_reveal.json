@@ -1,0 +1,47 @@
+{
+ "schema_version": 2,
+ "name": "proto_sheet_reveal",
+ "seed": 3,
+ "experiment": {
+  "type": "sheet_reveal",
+  "params": {}
+ },
+ "simulation": {
+  "fps": 30,
+  "duration": 8.0
+ },
+ "stages": [
+  {
+   "params": {
+    "hidden": "snowman"
+   }
+  }
+ ],
+ "camera": {
+  "preset": "wide",
+  "motion": "push_in"
+ },
+ "render": {
+  "samples": 32,
+  "denoise": false
+ },
+ "output": {
+  "width": 720,
+  "height": 1280,
+  "dir": "output"
+ },
+ "audio": {
+  "enabled": true,
+  "music_enabled": true,
+  "sfx_enabled": true
+ },
+ "hook": {
+  "mode": "closeup",
+  "seconds": 2.0,
+  "text": "auto",
+  "window": "clue"
+ },
+ "label": {
+  "size": 0.15
+ }
+}

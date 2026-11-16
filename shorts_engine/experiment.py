@@ -228,7 +228,8 @@ def experiment_to_legacy(data: dict) -> dict:
             # the hook is the extreme result with the question above it: frame it like a stage (text stays off the action)
             # and push in slowly
             fit = fit_camera(last.half_width, last.top, last.bottom, "wide", out.get("camera", {}).get("focal_length", 50.0),
-                             elevation=t.camera_defaults.get("elevation"), label_margin=1.45)    # room for the 2-3 line question
+                             elevation=t.camera_defaults.get("elevation"), label_margin=1.45,
+                             half_depth=last.half_depth)    # room for the 2-3 line question
             hook_closeup.update(distance_start=round(fit["distance"] * 1.1, 3), distance_end=round(fit["distance"] * 0.92, 3),
                                 height=fit["height"], target_z=fit["target_z"])
     return out

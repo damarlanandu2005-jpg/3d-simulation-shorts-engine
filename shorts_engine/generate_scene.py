@@ -70,6 +70,7 @@ def apply_render_settings(scene, cfg, samples: int | None = None) -> None:
     cy = scene.cycles
     cy.samples = samples or cfg.render.samples
     cy.max_bounces = cfg.render.max_bounces
+    cy.transparent_max_bounces = max(cy.transparent_max_bounces, 64)   # folded, dissolving cloth is many transparent layers deep
     cy.use_denoising = cfg.render.denoise
     if cfg.render.denoise:
         # OPTIX is only a valid enum value once an OptiX GPU is enabled, so it is set in prepare_render()
@@ -145,6 +146,11 @@ def build_stage(cfg, stage) -> None:
     t1 = time.perf_counter()
     method = simulation.bake_for(cfg, scene, handle, cfg.frame_count)
     bake_s = time.perf_counter() - t1
+    post = simulation.POST_BAKE.get(cfg.experiment_type)
+    outcome = post(scene, cfg, stage, handle) if post else None         # facts read from the baked result (winner, fill levels)
+    if outcome is not None:
+        (stage.blend_path.parent / "result.json").write_text(json.dumps(outcome, indent=1))
+        metric(kind="outcome", stage=stage.index, **outcome)
     bpy.ops.wm.save_mainfile()
     metric(stage=stage.index, faces=stage.faces, params=stage.params, setup_seconds=round(setup_s, 2),
            bake_seconds=round(bake_s, 2), bake_method=method, frames=cfg.frame_count)
@@ -172,8 +178,34 @@ def render_stage(cfg, stage, frame_start, frame_end) -> None:
 
     motion = getattr(cfg, "camera_motion", "static")
     before = camera_motion_callback(cfg, stage) if motion != "static" else None
+    before = with_label_schedule(scene, cfg, before)
     render_frames(scene, range(frame_start, frame_end + 1), lambda f: stage.frames_dir / f"frame_{f:04d}.png",
                   stage.index, stage.faces, device, denoiser, before_frame=before)
+
+
+def with_label_schedule(scene, cfg, before):
+    """Texts that change during a clip (question -> answer). The schedule is stored in the .blend by the builder."""
+    raw = scene.get("sim_markers")
+    schedule = json.loads(raw).get("label_schedule") if raw else None
+    if not schedule:
+        return before
+    steps = sorted((int(f), t) for f, t in schedule)
+
+    def at(frame):
+        text = ""
+        for f, t in steps:
+            if frame >= f:
+                text = t
+        return text
+
+    def move(frame):
+        text = at(frame)
+        bpy.data.objects["Label"].hide_render = not text
+        if text:
+            camera.set_label(text, cfg.label.size, camera.LABEL_Y)
+        if before:
+            before(frame)
+    return move
 
 
 def tracked_objects():
@@ -375,7 +407,28 @@ def impulse_events(cfg, scene):
     return found, {"ref_speed": round(ref, 3), "bodies": len(objs)}
 
 
-EVENT_DETECTORS = {"cloth": cloth_events, "impulse": impulse_events}
+def _with_accents(base):
+    """Wrap a detector: add the story's accent sounds (release whoosh, winner / reveal accent, new pour) from the markers."""
+    def detect(cfg, scene):
+        from shorts_engine import events as ev
+        found, debug = base(cfg, scene)
+        m = json.loads(scene["sim_markers"]) if scene.get("sim_markers") else {}
+        extra = []
+        if "release" in m:                                  # race: the release, then the winner's finish
+            extra.append(ev.SimEvent("whoosh", float(m["release"]), 0.8, source="release"))
+        if "winner_frame" in m:
+            extra.append(ev.SimEvent("bounce", float(m["winner_frame"]) + 1, 1.0, source="winner"))
+        if "reveal_start" in m:                             # sheet: the dissolve
+            extra.append(ev.SimEvent("whoosh", float(m["reveal_start"]), 0.9, source="reveal"))
+        for k, start in enumerate(m.get("pour_starts") or []):
+            if start and k > 0:                             # jar: each new, smaller pour
+                extra.append(ev.SimEvent("whoosh", float(start), 0.45, source=f"pour_{k}"))
+        return found + extra, {**debug, "accents": [e.source for e in extra]}
+    return detect
+
+
+EVENT_DETECTORS = {"cloth": cloth_events, "impulse": impulse_events, "race": _with_accents(impulse_events),
+                   "jar": _with_accents(impulse_events), "sheet": _with_accents(cloth_events)}
 
 
 def main(argv=None) -> None:

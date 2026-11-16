@@ -63,6 +63,7 @@ class Region:
     half_width: float
     top: float
     bottom: float = 0.0
+    half_depth: float | None = None      # half extent along the camera's viewing axis (defaults to half_width)
 
 
 @dataclass(frozen=True)
@@ -105,8 +106,9 @@ class ExperimentTemplate:
         ``params`` are the final stage's parameters (so {balls} is the extreme count); ``first_params`` the first stage's."""
         first, last = stage_values[0], stage_values[-1]
         vals = {**self.label_values(params, last), **params}
-        vals.update(first=fmt_num(first), last=fmt_num(last),
-                    total_ratio=fmt_num(last / first if first else 0))
+        numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (first, last))
+        vals.update(first=fmt_num(first) if numeric else first, last=fmt_num(last) if numeric else last,
+                    total_ratio=fmt_num(last / first if first else 0) if numeric else "1")
         vals.update({f"{k}_first": v for k, v in self.label_values(first_params or params, first).items()})
         vals.update({f"{k}_last": v for k, v in self.label_values(params, last).items()})
         vals.update(stages=len(stage_values))
@@ -438,6 +440,159 @@ register(ExperimentTemplate(
     stage_variations=((1, 2, 3, 4), (1, 2, 3, 4, 5), (1, 2, 4), (2, 3, 4, 5)),
     material_defaults={"cloth_style": "solid", "cloth_color": [0.93, 0.3, 0.5, 1.0], "cloth_metallic": 0.0, "cloth_roughness": 0.35},
     events="cloth", stage_meaning="number of objects the cloth falls on",
+))
+
+
+# ---------------------------------------------------------------------------------------------- story experiments
+# Race / mystery / packing: one central question per video, answered by the physics (not a parameter ramp).
+RACE_SHAPES = ("sphere", "ring", "can", "prism", "cone", "cube")      # lane order, left to right
+RACE_NAMES = {"sphere": "SPHERE", "ring": "RING", "can": "CAN", "prism": "PRISM", "cone": "CONE", "cube": "CUBE"}
+HIDDEN_OBJECTS = ("snowman", "pyramid", "tower")
+HIDDEN_NAMES = {"snowman": "A SNOWMAN", "pyramid": "A PYRAMID", "tower": "A TOWER"}
+
+
+def race_geometry(p: dict) -> dict:
+    """Ramp numbers shared by the builder, the camera region and the validator (metres, degrees)."""
+    th = math.radians(p["incline"])
+    width = len(RACE_SHAPES) * p["lane_width"]
+    return {"theta": th, "width": width, "run": p["ramp_length"] * math.cos(th), "rise": p["ramp_length"] * math.sin(th)}
+
+
+def _race_label(p, incline):
+    return {"incline": fmt_num(incline), "shapes": len(RACE_SHAPES)}
+
+
+def _race_region(p, incline):
+    g = race_geometry({**p, "incline": incline})
+    return Region(half_width=g["width"] / 2 + 0.2, top=g["rise"] + 0.6, half_depth=g["run"] / 2 + 1.0)
+
+
+def _check_race(p, stages, shape):
+    for inc in stages:
+        if p["lane_width"] < 2.2 * p["shape_size"]:
+            _fail(f"lane_width {p['lane_width']} must be at least 2.2 x shape_size ({2.2 * p['shape_size']:.2f}) so a shape fits its lane")
+        if p["ramp_length"] < 6 * p["shape_size"]:
+            _fail(f"ramp_length {p['ramp_length']} is too short for shape_size {p['shape_size']}")
+        if p["release_delay"] * 1.0 > 6:
+            _fail("release_delay must be <= 6 s")
+        if math.tan(math.radians(inc)) <= 0:
+            _fail("incline must be positive")
+
+
+def _jar_label(p, pours):
+    return {"pours": pours}
+
+
+def _jar_region(p, pours):
+    return Region(half_width=p["jar_radius"] + 0.1, top=p["jar_height"] + 0.25, bottom=-0.12)
+
+
+def _check_jar(p, stages, shape):
+    r = p["big_radius"]
+    if 2 * r * 2.2 > 2 * p["jar_radius"]:
+        _fail(f"big_radius {r} is too large for jar_radius {p['jar_radius']} (the rocks must pass each other inside the jar)")
+    volume = math.pi * p["jar_radius"] ** 2 * p["jar_height"]
+    counts = jar_pours(p)[:max(stages)]
+    total = sum(n * (4 / 3) * math.pi * rr ** 3 for rr, n in counts)
+    if total > 0.9 * volume:
+        _fail(f"the pours add {total:.2f} m3 but the jar holds only {volume:.2f} m3: reduce the counts or enlarge the jar")
+
+
+def jar_pours(p: dict) -> list:
+    """[(radius, count), ...] for the four pours: large -> medium -> small -> tiny."""
+    r = p["big_radius"]
+    fractions = (1.0, p["medium_fraction"], p["small_fraction"], p["tiny_fraction"])
+    return [(r * f, int(p[k])) for f, k in zip(fractions, ("n_large", "n_medium", "n_small", "n_tiny"))]
+
+
+def _hidden_label(p, hidden):
+    return {"hidden": hidden, "hidden_name": HIDDEN_NAMES.get(hidden, hidden.upper())}
+
+
+def _hidden_region(p, hidden):
+    h = {"snowman": 3.9, "pyramid": 3.2, "tower": 4.4}[hidden]
+    return Region(half_width=p["cloth_size"] / 2 * 0.5, top=h + 0.5)
+
+
+def _check_sheet(p, stages, shape):
+    for hidden in stages:
+        h = {"snowman": 4.2, "pyramid": 3.2, "tower": 4.4}[hidden]
+        if p["cloth_size"] < 1.55 * (h / 1.7):
+            _fail(f"cloth_size {p['cloth_size']} is too small to cover a {hidden} ({h} m tall)")
+        if p["reveal_seconds"] <= 0 or p["reveal_start"] <= 0:
+            _fail("reveal_start and reveal_seconds must be > 0")
+
+
+register(ExperimentTemplate(
+    name="roll_off",
+    description="Six different shapes are released together on one lane-divided ramp: which reaches the bottom first?",
+    simulation="rigid_body", objects=("mixed",), default_object="mixed",
+    params={
+        "shape_size": ParamDef(0.42, 0.15, 0.6, description="characteristic radius of every racer (m)"),
+        "lane_width": ParamDef(1.0, 0.5, 2.0, description="width of each of the six lanes (m)"),
+        "ramp_length": ParamDef(10.0, 4.0, 20.0, description="length of the ramp along its slope (m)"),
+        "ramp_friction": ParamDef(0.4, 0.0, 2.0, description="friction of the ramp surface"),
+        "friction": ParamDef(0.4, 0.0, 2.0, description="friction of the racers"),
+        "restitution": ParamDef(0.12, 0.0, 0.9),
+        "release_delay": ParamDef(1.1, 0.2, 6.0, description="seconds the racers are held at the start line"),
+        "finish_hold": ParamDef(2.2, 0.5, 10.0, description="seconds shown after the winner crosses the line"),
+    },
+    stage_param="incline", stage_def=ParamDef(None, 6, 40), default_stage_values=(17.0,),
+    label="WHICH ONE\nWINS?", label_values=_race_label,
+    hooks=("WHICH ONE WINS?",),
+    frame_region=_race_region, validate=_check_race, camera_defaults={"elevation": 68.0},
+    stage_extras=("ramp_friction", "friction"), events="race", stage_meaning="ramp incline in degrees",
+    material_defaults={"ground_color": [0.85, 0.87, 0.92, 1.0]},
+    variations={"shape_size": (0.34, 0.46), "ramp_friction": (0.3, 0.6), "restitution": (0.05, 0.3)},
+))
+
+register(ExperimentTemplate(
+    name="sheet_reveal",
+    description="A cloth sheet falls over a hidden object; its silhouette is the clue, then the sheet dissolves to reveal it.",
+    simulation="cloth", objects=("mixed",), default_object="mixed",
+    params={
+        "cloth_size": ParamDef(8.0, 3.0, 30),
+        "drop_height": ParamDef(1.4, 0.1, 30, description="height of the sheet above the hidden object's top (m)"),
+        "faces": ParamDef(6400, 100, 1_000_000, kind="square", description="cloth mesh resolution"),
+        "reveal_start": ParamDef(4.6, 0.5, 30, description="second at which the sheet starts to dissolve"),
+        "reveal_seconds": ParamDef(1.4, 0.2, 10, description="seconds the dissolve takes"),
+    },
+    stage_param="hidden", stage_def=ParamDef(None, kind="choice", choices=HIDDEN_OBJECTS), default_stage_values=("snowman",),
+    label="WHAT'S UNDER\nTHE SHEET?", label_values=_hidden_label,
+    hooks=("WHAT'S UNDER THE SHEET?",),
+    frame_region=_hidden_region, validate=_check_sheet, camera_defaults={"elevation": 16.0},
+    material_defaults={"cloth_style": "solid", "cloth_color": [0.93, 0.3, 0.5, 1.0], "cloth_metallic": 0.0, "cloth_roughness": 0.45},
+    events="sheet", stage_meaning="which object is hidden: snowman | pyramid | tower",
+    variations={"drop_height": (1.0, 2.0), "reveal_seconds": (1.0, 2.0)},
+    stage_variations=(("pyramid",), ("tower",)),
+))
+
+register(ExperimentTemplate(
+    name="jar_packing",
+    description="A jar is filled with large rocks until it looks full, then medium, small and tiny ones keep fitting in the gaps.",
+    simulation="rigid_body", objects=("sphere",), default_object="sphere",
+    params={
+        "jar_radius": ParamDef(1.1, 0.5, 3.0, description="inner radius of the jar (m)"),
+        "jar_height": ParamDef(2.2, 0.8, 6.0, description="height of the jar wall (m)"),
+        "big_radius": ParamDef(0.40, 0.1, 1.0, description="radius of the large rocks (m)"),
+        "medium_fraction": ParamDef(0.42, 0.2, 0.7, description="medium radius as a fraction of the large radius (<= 0.41 fits the gaps of a rock pile)"),
+        "small_fraction": ParamDef(0.21, 0.08, 0.5, description="small radius as a fraction of the large radius"),
+        "tiny_fraction": ParamDef(0.13, 0.05, 0.4, description="tiny radius as a fraction of the large radius"),
+        "n_large": ParamDef(12, 1, 200, kind="int"),
+        "n_medium": ParamDef(36, 0, 600, kind="int"),
+        "n_small": ParamDef(110, 0, 1500, kind="int"),
+        "n_tiny": ParamDef(260, 0, 3000, kind="int"),
+        "pour_gap": ParamDef(2.7, 1.0, 10.0, description="seconds between the starts of consecutive pours"),
+        "friction": ParamDef(0.6, 0.0, 2.0),
+        "restitution": ParamDef(0.03, 0.0, 0.9),
+    },
+    stage_param="pours", stage_def=ParamDef(None, 2, 4, kind="int"), default_stage_values=(4,),
+    label="IS IT REALLY\nFULL?", label_values=_jar_label,
+    hooks=("IS THE JAR REALLY FULL?",),
+    frame_region=_jar_region, validate=_check_jar, camera_defaults={"elevation": 9.0},
+    events="jar", stage_meaning="how many pours (large, medium, small, tiny) are shown",
+    variations={"pour_gap": (2.3, 3.4), "friction": (0.4, 0.9)},
+    stage_variations=((3,), (2,)),
 ))
 
 

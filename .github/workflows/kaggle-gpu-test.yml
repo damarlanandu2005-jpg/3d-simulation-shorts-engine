@@ -41,6 +41,7 @@ on:
         options:
           - auto
           - curated
+          - prototypes # configs/prototypes/*.json: the three creative prototypes in one kernel
           - multiple_balls
           - ball_funnel
           - ring_toss

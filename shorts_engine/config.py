@@ -345,8 +345,10 @@ class ExperimentConfig(Config):
                 t.validate(t.resolve_params(self.stage_params(i)), list(self.stage_values), self.shape)
         if self.camera_preset not in PRESETS + ("manual",):
             raise ConfigError(f"camera.preset must be one of {PRESETS + ('manual',)}, got {self.camera_preset!r}")
-        if self.hook_window not in ("start", "end"):
-            raise ConfigError(f"hook.window must be 'start' or 'end', got {self.hook_window!r}")
+        if self.hook_window not in ("start", "end", "clue"):
+            raise ConfigError(f"hook.window must be 'start', 'end' or 'clue', got {self.hook_window!r}")
+        if self.hook_window == "clue" and "reveal_start" not in t.params:
+            raise ConfigError(f"hook.window 'clue' needs an experiment with a reveal (not {t.name})")
         if self.camera_motion not in MOTIONS:
             raise ConfigError(f"camera.motion must be one of {MOTIONS}, got {self.camera_motion!r}")
 
@@ -368,6 +370,9 @@ class ExperimentConfig(Config):
 
     def hook_frame_range(self) -> tuple[int, int]:
         n = min(self.frame_count, max(1, round(self.video.hook_seconds * self.fps)))
+        if self.hook_window == "clue":                  # the moments just before the answer is revealed (e.g. the covered sheet)
+            end = max(n, round(self.params["reveal_start"] * self.fps) - 1)
+            return (end - n + 1, end)
         return (1, n) if self.hook_window == "start" else (self.frame_count - n + 1, self.frame_count)
 
     def stage_label(self, value, index: int | None = None) -> str:
@@ -411,7 +416,7 @@ class ExperimentConfig(Config):
         t = self.template
         region = t.frame_region(self.stage_params(index), self.stage_values[index])
         fit = fit_camera(region.half_width, region.top, region.bottom, self.camera_preset, self.camera.focal_length,
-                         elevation=t.camera_defaults.get("elevation"))
+                         elevation=t.camera_defaults.get("elevation"), half_depth=region.half_depth)
         return replace(self.camera, per_stage=[], **{**fit, **override})
 
 

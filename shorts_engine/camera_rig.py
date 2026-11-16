@@ -18,7 +18,7 @@ _PRESET = {"wide": (24.0, 1.0, 0.42), "side": (3.0, 1.0, 0.42), "top": (82.0, 1.
 
 def fit_camera(half_width: float, top: float, bottom: float = 0.0, preset: str = "wide",
                focal: float = 50.0, aspect: float = 9 / 16, margin: float = 1.12, elevation: float | None = None,
-               label_margin: float = LABEL_MARGIN) -> dict:
+               label_margin: float = LABEL_MARGIN, half_depth: float | None = None) -> dict:
     """Camera that keeps a region (half_width wide each side, from ``bottom`` to ``top``) inside a vertical frame."""
     if preset not in _PRESET:
         raise ValueError(f"unknown camera preset {preset!r}; choose from {PRESETS}")
@@ -33,8 +33,9 @@ def fit_camera(half_width: float, top: float, bottom: float = 0.0, preset: str =
     fwd = (0.0, math.cos(e), -math.sin(e))                # camera sits at -y, above the target, looking at it
     up = (0.0, math.sin(e), math.cos(e))
     need = 0.0
+    hd = half_width if half_depth is None else half_depth
     for x in (-half_width, half_width):                   # every corner of the region must project inside the frame
-        for y in (-half_width, half_width):
+        for y in (-hd, hd):
             for z in (bottom, top):
                 p = (x, y, z - tz)
                 depth_offset = p[1] * fwd[1] + p[2] * fwd[2]          # corner depth relative to the target depth

@@ -22,7 +22,7 @@ def doc(exp, **extra):
 
 
 def test_registry_lists_exactly_the_implemented_experiments():
-    assert sorted(TEMPLATES) == sorted(["cloth_drape"] + NEW)
+    assert sorted(TEMPLATES) == sorted(["cloth_drape", "roll_off", "sheet_reveal", "jar_packing"] + NEW)
     assert experiment.EXPERIMENT_TYPES is TEMPLATES
 
 

@@ -17,7 +17,8 @@ _PRESET = {"wide": (24.0, 1.0, 0.42), "side": (3.0, 1.0, 0.42), "top": (82.0, 1.
 
 
 def fit_camera(half_width: float, top: float, bottom: float = 0.0, preset: str = "wide",
-               focal: float = 50.0, aspect: float = 9 / 16, margin: float = 1.12, elevation: float | None = None) -> dict:
+               focal: float = 50.0, aspect: float = 9 / 16, margin: float = 1.12, elevation: float | None = None,
+               label_margin: float = LABEL_MARGIN) -> dict:
     """Camera that keeps a region (half_width wide each side, from ``bottom`` to ``top``) inside a vertical frame."""
     if preset not in _PRESET:
         raise ValueError(f"unknown camera preset {preset!r}; choose from {PRESETS}")
@@ -25,7 +26,7 @@ def fit_camera(half_width: float, top: float, bottom: float = 0.0, preset: str =
     if elevation is not None and preset in ("wide", "close"):     # experiment-specific viewing angle (e.g. look into a funnel)
         elev_deg = elevation
     e = math.radians(elev_deg)
-    tan_v = (SENSOR_HEIGHT / 2) / focal / LABEL_MARGIN     # the label/hook text uses the top of the frame
+    tan_v = (SENSOR_HEIGHT / 2) / focal / label_margin     # the label/hook text uses the top of the frame
     tan_h = (SENSOR_HEIGHT / 2) / focal * aspect
     height_extent = top - bottom
     tz = bottom if preset == "top" else bottom + height_extent * frac

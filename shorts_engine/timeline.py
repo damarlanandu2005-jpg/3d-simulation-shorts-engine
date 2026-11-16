@@ -35,7 +35,7 @@ def segments(cfg: Config, skip_extras: bool = False) -> list[Segment]:
         first, last = cfg.hook_frame_range()
         out.append(Segment("hook", len(stages) - 1, first, last))
     for st in stages:
-        out.append(Segment("stage", st.index, 1, cfg.frame_count))
+        out.append(Segment("stage", st.index, 1, cfg.stage_frames(st.index)))
         if st.index < len(cards):
             out.append(Segment("card", None, 1, cards[st.index].frames))
     t = 0.0

@@ -14,7 +14,7 @@ from . import materials
 _OBJECT_TOP = {"sphere": 2.0, "cube": 2.0, "cylinder": 2.0, "cone": 2.0, "torus": 0.8}
 
 
-def create_ground(scene, color, size: float = 40.0):
+def create_ground(scene, color, size: float = 40.0, catcher: bool = False):
     half = size / 2
     mesh = bpy.data.meshes.new("Ground")
     mesh.from_pydata([(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)], [], [(0, 1, 2, 3)])
@@ -23,6 +23,8 @@ def create_ground(scene, color, size: float = 40.0):
     scene.collection.objects.link(obj)
     obj.modifiers.new("Collision", "COLLISION")
     materials.assign(obj, materials.principled("GroundMat", color, 0.0, 0.8))
+    if catcher:                                  # studio look: the floor shows only shadows over the background (no horizon line)
+        obj.is_shadow_catcher = True
     return obj
 
 
@@ -190,7 +192,7 @@ def setup_rigid_world(scene, cfg, frames: int, substeps: int = 30, iterations: i
 
 def create_floor_and_wall(scene, cfg, radius: float, wall_height: float, friction: float, restitution: float):
     """Floor plane plus an optional translucent wall (open cylinder) that keeps objects inside the frame."""
-    floor = create_ground(scene, cfg.material.ground_color)
+    floor = create_ground(scene, cfg.material.ground_color, catcher=hasattr(cfg, 'experiment'))
     floor.modifiers.clear()
     make_rigid(floor, "PASSIVE", "BOX", friction, restitution)
     wall = None
@@ -227,7 +229,8 @@ def _smooth(obj):
 
 def build_balls_stage(scene, cfg, stage):
     from .templates import spawn_positions
-    p, n = cfg.params, stage.params["balls"]
+    p = {**cfg.params, **stage.params}
+    n = p["balls"]
     setup_rigid_world(scene, cfg, cfg.frame_count)
     create_floor_and_wall(scene, cfg, p["arena_radius"], p["wall_height"], p["friction"], p["restitution"])
     r = p["ball_radius"]
@@ -274,7 +277,8 @@ def _lathe_cone(scene, name: str, r_top: float, r_bottom: float, height: float, 
 
 def build_funnel_stage(scene, cfg, stage):
     from .templates import spawn_positions
-    p, hole = cfg.params, stage.params["hole_radius"]
+    p = {**cfg.params, **stage.params}
+    hole = p["hole_radius"]
     setup_rigid_world(scene, cfg, cfg.frame_count)
     create_floor_and_wall(scene, cfg, p["funnel_radius"] * 1.12, p["funnel_z"] * 0.55, p["friction"], p["restitution"])
     funnel = _lathe_cone(scene, "Funnel", p["funnel_radius"], hole, p["funnel_height"], p["funnel_z"], 0.1)
@@ -297,9 +301,10 @@ def build_funnel_stage(scene, cfg, stage):
 def build_rings_stage(scene, cfg, stage):
     import math
     import random
-    p, ratio = cfg.params, stage.params["hole_ratio"]
+    p = {**cfg.params, **stage.params}
+    ratio = p["hole_ratio"]
     setup_rigid_world(scene, cfg, cfg.frame_count, substeps=40, iterations=50)
-    create_floor_and_wall(scene, cfg, 2.2, 0.45, p["friction"], p["restitution"])
+    create_floor_and_wall(scene, cfg, p["arena_radius"], p["wall_height"], p["friction"], p["restitution"])
     bpy.ops.mesh.primitive_cylinder_add(radius=p["pole_radius"], depth=p["pole_height"], vertices=32,
                                         location=(0, 0, p["pole_height"] / 2))
     pole = bpy.context.active_object
@@ -330,9 +335,10 @@ def build_rings_stage(scene, cfg, stage):
 
 def build_cloth_objects_stage(scene, cfg, stage):
     from .templates import collider_layout
-    p, n = cfg.params, stage.params["objects"]
+    p = {**cfg.params, **stage.params}
+    n = p["objects"]
     scene.gravity = (0.0, 0.0, -cfg.physics.gravity)
-    create_ground(scene, cfg.material.ground_color)
+    create_ground(scene, cfg.material.ground_color, catcher=hasattr(cfg, 'experiment'))
     top = 0.0
     for i, xy in enumerate(collider_layout(n, p["spacing"])):
         collider, top_z = create_collider(scene, cfg.shape, p["object_scale"], xy, f"Collider_{i}")

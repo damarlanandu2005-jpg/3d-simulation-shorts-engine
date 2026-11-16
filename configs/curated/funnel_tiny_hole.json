@@ -1,0 +1,64 @@
+{
+ "schema_version": 2,
+ "name": "funnel_tiny_hole",
+ "seed": 2,
+ "experiment": {
+  "type": "ball_funnel",
+  "params": {}
+ },
+ "simulation": {
+  "fps": 30,
+  "duration": 3.0,
+  "payoff_duration": 5.0
+ },
+ "stages": [
+  {
+   "params": {
+    "hole_radius": 0.8
+   }
+  },
+  {
+   "params": {
+    "hole_radius": 0.58
+   }
+  },
+  {
+   "params": {
+    "hole_radius": 0.42
+   }
+  },
+  {
+   "params": {
+    "hole_radius": 0.32
+   }
+  },
+  {
+   "params": {
+    "hole_radius": 0.24
+   }
+  }
+ ],
+ "camera": {
+  "preset": "wide",
+  "motion": "static"
+ },
+ "render": {
+  "samples": 24,
+  "denoise": false
+ },
+ "output": {
+  "width": 720,
+  "height": 1280,
+  "dir": "output"
+ },
+ "hook": {
+  "mode": "closeup",
+  "seconds": 2.0,
+  "text": "auto"
+ },
+ "audio": {
+  "enabled": true,
+  "music_enabled": true,
+  "sfx_enabled": true
+ }
+}

@@ -120,7 +120,7 @@ def plan_jobs(
             jobs.append(Job(f"bake stage {i} ({st.label})", "bake",
                             scene_cmd(runner, use_blender, base + ["--mode", "build"]), i))
         if do_render:
-            for (a, b) in split_frame_range(fs, fe, chunks):
+            for (a, b) in split_frame_range(fs, min(fe, cfg.stage_frames(i)), chunks):
                 jobs.append(Job(f"render stage {i} frames {a}-{b}", "render",
                                 scene_cmd(runner, use_blender, base + ["--mode", "render",
                                                                        "--frame-start", str(a), "--frame-end", str(b)]), i))
@@ -152,7 +152,7 @@ def plan_jobs(
         for st in all_stages:
             jobs.append(Job(f"encode clip {st.index}", "clip",
                             assemble.stage_clip_cmd(st.frames_dir, cfg.fps, st.clip_path, cfg.video.crf, ffmpeg), st.index,
-                            check_frames=(st.frames_dir, 1, cfg.frame_count)))
+                            check_frames=(st.frames_dir, 1, cfg.stage_frames(st.index))))
         for card in cards:
             jobs.append(Job(f"encode card {card.index}", "clip",
                             assemble.stage_clip_cmd(card.frames_dir, cfg.fps, card.clip_path, cfg.video.crf, ffmpeg),

@@ -85,6 +85,9 @@ class ExperimentTemplate:
     stage_variations: tuple = ()                     # alternative stage progressions the batch generator can pick
     events: str = "impulse"                          # event detector key (generate_scene.EVENT_DETECTORS)
     validate: Callable | None = None                 # (params, stage values, shape) -> raises ConfigError on a broken combination
+    stage_extras: tuple = ()                         # other params a stage may override (the escalation beyond stage_param)
+    default_extras: Callable | None = None           # (params, stage values) -> one override dict per stage
+    material_defaults: dict = field(default_factory=dict)   # look of this experiment (the config's material section overrides)
     stage_meaning: str = ""
 
     def resolve_params(self, given: dict, path: str = "experiment.params") -> dict:
@@ -96,13 +99,15 @@ class ExperimentTemplate:
     def check_stage_value(self, value: Any, path: str) -> Any:
         return self.stage_def.check(value, path)
 
-    def hook_values(self, params: dict, stage_values: list) -> dict:
-        """Placeholders available to hook text: stage_param first/last, ratio, plus every parameter."""
+    def hook_values(self, params: dict, stage_values: list, first_params: dict | None = None) -> dict:
+        """Placeholders available to hook text: stage_param first/last, ratio, plus every parameter.
+
+        ``params`` are the final stage's parameters (so {balls} is the extreme count); ``first_params`` the first stage's."""
         first, last = stage_values[0], stage_values[-1]
         vals = {**self.label_values(params, last), **params}
         vals.update(first=fmt_num(first), last=fmt_num(last),
                     total_ratio=fmt_num(last / first if first else 0))
-        vals.update({f"{k}_first": v for k, v in self.label_values(params, first).items()})
+        vals.update({f"{k}_first": v for k, v in self.label_values(first_params or params, first).items()})
         vals.update({f"{k}_last": v for k, v in self.label_values(params, last).items()})
         vals.update(stages=len(stage_values))
         return vals
@@ -191,25 +196,57 @@ def _balls_label(params, n):
 def _balls_region(p, n):
     r = p["ball_radius"]
     layers = math.ceil(n / _cells_per_layer(r, p["spread"]))
-    top = p["drop_height"] + layers * PITCH * r + r
-    return Region(half_width=p["arena_radius"], top=top)
+    top = p["wall_height"] + 0.3          # balls enter from above the frame; the container fills it
+    return Region(half_width=p["arena_radius"] + 0.15, top=top)
 
 
 def _funnel_label(p, hole):
-    return {"hole_ratio": fmt_num(round(hole / p["ball_radius"], 1)), "hole": fmt_num(hole)}
+    n = int(p["balls"])
+    return {"hole_ratio": fmt_num(round(hole / p["ball_radius"], 1)), "hole": fmt_num(hole), "balls": f"{n:,}",
+            "ball_word": plural(n, "BALL")}
 
 
 def _funnel_region(p, hole):
-    top = p["funnel_z"] + p["funnel_height"] + p["drop_height"] + math.ceil(p["balls"] / 10) * 0.45 * p["ball_radius"] * 2
-    return Region(half_width=p["funnel_radius"] * 1.15, top=min(top, p["funnel_z"] + p["funnel_height"] + 3.0))
+    return Region(half_width=p["funnel_radius"] * 1.12, top=p["funnel_z"] + p["funnel_height"] + 0.6)
+
+
+def _ring_size_word(ratio):
+    for limit, word in ((2.5, "WIDE RING"), (1.8, "LOOSE RING"), (1.3, "SNUG RING"), (1.0, "TIGHT RING")):
+        if ratio >= limit:
+            return word
+    return "TOO TIGHT"
 
 
 def _ring_label(p, ratio):
-    return {"hole_ratio": fmt_num(ratio), "rings": p["rings"], "ring_word": plural(p["rings"], "RING")}
+    return {"hole_ratio": fmt_num(ratio), "rings": p["rings"], "ring_word": plural(p["rings"], "RING"),
+            "ring_size": _ring_size_word(ratio)}
 
 
 def _ring_region(p, ratio):
-    return Region(half_width=2.3, top=p["pole_height"] + p["drop_height"] + 0.8)
+    return Region(half_width=p["arena_radius"] + 0.1, top=p["pole_height"] + 0.6 + 2.0 * p["ring_minor"] * p["rings"])
+
+
+def ramp(final: float, n: int, start: float, integer: bool = True) -> list:
+    """Escalation curve from ``start`` to ``final`` over ``n`` stages (geometric: each stage clearly more than the last)."""
+    if n == 1:
+        return [final]
+    vals = [start * (final / start) ** (i / (n - 1)) for i in range(n)]
+    if integer:
+        vals = [max(1, round(v)) for v in vals]
+        for i in range(1, n):                              # strictly increasing
+            vals[i] = max(vals[i], vals[i - 1] + 1)
+        vals[-1] = max(vals[-1], int(final))
+    return vals
+
+
+def _funnel_extras(p, stage_values):
+    n = len(stage_values)
+    return [{"balls": int(b)} for b in ramp(p["balls"], n, max(3, p["balls"] // 8))]
+
+
+def _ring_extras(p, stage_values):
+    n = len(stage_values)
+    return [{"rings": int(r)} for r in ramp(p["rings"], n, 1)]
 
 
 def _objects_label(p, n):
@@ -219,7 +256,7 @@ def _objects_label(p, n):
 def _objects_region(p, n):
     pos = collider_layout(n, p["spacing"])
     half = max(max(abs(x), abs(y)) for x, y in pos) + p["object_scale"] + 0.3
-    half = max(half, p["cloth_size"] / 2 * 0.75)
+    half = max(half, p["cloth_size"] / 2 * 0.6)
     return Region(half_width=half, top=p["object_scale"] * 2 + p["drop_height"] + 0.6)
 
 
@@ -233,6 +270,10 @@ def _check_balls(p, stages, shape):
         _fail(f"spread ({p['spread']}) + ball_radius must fit inside arena_radius ({arena}): objects would start outside the arena")
     if 3 * r > arena:
         _fail(f"ball_radius {r} is too large for arena_radius {arena}")
+    if p["wall_height"] > 0:
+        settled = max(stages) * (4 / 3) * r ** 3 / (0.6 * arena ** 2)
+        if settled > p["wall_height"] * 0.9:
+            _fail(f"{max(stages)} objects fill the container to {settled:.2f} m, above its wall ({p['wall_height']} m); raise wall_height or widen arena_radius")
     cap = 3 * 0.8 * (arena / r) ** 2
     if max(stages) > cap:
         _fail(f"{max(stages)} objects of radius {r} do not fit in an arena of radius {arena} (limit about {int(cap)}); "
@@ -256,8 +297,9 @@ def _check_funnel(p, stages, shape):
 
 def _check_rings(p, stages, shape):
     outer = p["pole_radius"] * max(stages) + 2 * p["ring_minor"]
-    if outer > 1.6:
-        _fail(f"ring outer radius {outer:.2f} is too large for the scene (limit 1.6); reduce the hole ratio or ring_minor")
+    if outer > p["arena_radius"] * 0.65:
+        _fail(f"ring outer radius {outer:.2f} is too large for the arena (limit {p['arena_radius'] * 0.65:.2f}); "
+              "reduce the hole ratio or ring_minor, or enlarge arena_radius")
     if p["ring_minor"] > p["pole_radius"] * 3:
         _fail("ring_minor (tube radius) must not exceed three pole radii")
     if min(stages) * p["pole_radius"] < p["ring_minor"] * 0.3:
@@ -307,21 +349,21 @@ register(ExperimentTemplate(
     description="Balls are dropped into a round arena; stages raise the number of balls (1 -> 100).",
     simulation="rigid_body", objects=_BALL_SHAPES, default_object="sphere",
     params={
-        "ball_radius": ParamDef(0.22, 0.08, 0.6, description="radius of each object (m)"),
-        "drop_height": ParamDef(2.2, 0.3, 12, description="height of the lowest layer above the floor (m)"),
-        "spread": ParamDef(1.5, 0.2, 4.0, description="radius of the area the objects start over (m)"),
-        "arena_radius": ParamDef(2.7, 1.0, 8.0, description="radius of the floor/walls that keep objects in frame (m)"),
-        "wall_height": ParamDef(0.7, 0.0, 4.0, description="height of the arena wall (m); 0 = open floor"),
+        "ball_radius": ParamDef(0.2, 0.08, 0.6, description="radius of each object (m)"),
+        "drop_height": ParamDef(2.0, 0.3, 12, description="height of the lowest layer above the floor (m)"),
+        "spread": ParamDef(1.0, 0.2, 4.0, description="radius of the area the objects start over (m)"),
+        "arena_radius": ParamDef(1.3, 1.0, 8.0, description="radius of the container that keeps objects in frame (m)"),
+        "wall_height": ParamDef(3.0, 0.0, 6.0, description="height of the container wall (m); 0 = open floor"),
         "restitution": ParamDef(0.55, 0.0, 0.95, description="bounciness (0 = dead, 0.95 = super ball)"),
         "friction": ParamDef(0.5, 0.0, 2.0, description="surface friction"),
     },
-    stage_param="balls", stage_def=ParamDef(None, 1, 400, kind="int"), default_stage_values=(1, 10, 50, 100),
+    stage_param="balls", stage_def=ParamDef(None, 1, 400, kind="int"), default_stage_values=(5, 15, 30, 60, 100),
     label="{balls} {ball_word}", label_values=_balls_label,
-    hooks=("WHAT HAPPENS WHEN WE DROP {last} {things}?", "{first} {thing} VS {last} {things}", "ONE {thing} IS EASY. NOW {last}."),
-    frame_region=_balls_region, validate=_check_balls,
-    variations={"ball_radius": (0.14, 0.34), "drop_height": (1.2, 4.0), "restitution": (0.15, 0.85),
-                "friction": (0.1, 1.2), "spread": (1.0, 2.0)},
-    stage_variations=((1, 5, 25, 75), (1, 10, 50, 100), (2, 8, 32, 128), (1, 3, 9, 27, 81)),
+    hooks=("WHAT HAPPENS WHEN {last} {things} DROP AT ONCE?", "HOW MANY {things} CAN ONE BOX TAKE?", "{first} {things}... NOW {last}."),
+    frame_region=_balls_region, validate=_check_balls, camera_defaults={"elevation": 14.0},
+    variations={"ball_radius": (0.16, 0.26), "drop_height": (1.4, 3.0), "restitution": (0.15, 0.75),
+                "friction": (0.1, 1.2), "spread": (0.8, 1.05)},
+    stage_variations=((5, 15, 30, 60, 100), (4, 12, 30, 70), (3, 10, 25, 50, 90, 120), (6, 20, 45, 80)),
     events="impulse", stage_meaning="number of objects dropped",
 ))
 
@@ -330,23 +372,23 @@ register(ExperimentTemplate(
     description="Balls pour into a funnel; stages shrink the hole (large -> small) until the flow jams.",
     simulation="rigid_body", objects=("sphere",), default_object="sphere",
     params={
-        "ball_radius": ParamDef(0.18, 0.08, 0.4, description="ball radius (m)"),
-        "balls": ParamDef(40, 2, 200, kind="int", description="number of balls poured in"),
-        "funnel_radius": ParamDef(2.0, 0.8, 5.0, description="radius of the funnel opening (m)"),
-        "funnel_height": ParamDef(1.7, 0.6, 5.0, description="height of the funnel cone (m)"),
-        "funnel_z": ParamDef(1.5, 0.5, 4.0, description="height of the hole above the floor (m)"),
-        "drop_height": ParamDef(1.0, 0.2, 6.0, description="height of the lowest ball above the funnel rim (m)"),
+        "ball_radius": ParamDef(0.16, 0.08, 0.4, description="ball radius (m)"),
+        "balls": ParamDef(60, 2, 200, kind="int", description="balls poured in the FINAL stage (earlier stages pour fewer)"),
+        "funnel_radius": ParamDef(1.6, 0.8, 5.0, description="radius of the funnel opening (m)"),
+        "funnel_height": ParamDef(1.8, 0.6, 5.0, description="height of the funnel cone (m)"),
+        "funnel_z": ParamDef(1.0, 0.5, 4.0, description="height of the hole above the floor (m)"),
+        "drop_height": ParamDef(0.8, 0.2, 6.0, description="height of the lowest ball above the funnel rim (m)"),
         "restitution": ParamDef(0.3, 0.0, 0.9),
         "friction": ParamDef(0.35, 0.0, 2.0),
     },
-    stage_param="hole_radius", stage_def=ParamDef(None, 0.1, 3.0), default_stage_values=(0.9, 0.6, 0.42, 0.3),
-    label="HOLE {hole_ratio}× BALL", label_values=_funnel_label,
-    hooks=("HOW SMALL CAN THE HOLE GET?", "WILL {balls} BALLS FIT THROUGH A {hole_ratio_last}× HOLE?",
-           "WHEN DOES THE FLOW JAM?"),
+    stage_param="hole_radius", stage_def=ParamDef(None, 0.1, 3.0), default_stage_values=(0.8, 0.58, 0.42, 0.32, 0.24),
+    label="{balls} {ball_word}", label_values=_funnel_label,
+    hooks=("CAN {balls} BALLS ESCAPE A TINY HOLE?", "HOW SMALL CAN THE HOLE GET?", "WHEN DOES THE FLOW JAM?"),
     frame_region=_funnel_region, validate=_check_funnel, camera_defaults={"elevation": 40.0},
-    variations={"balls": (24, 70), "restitution": (0.05, 0.6), "friction": (0.1, 0.9), "ball_radius": (0.12, 0.24),
-                "funnel_height": (1.3, 2.2)},
-    stage_variations=((0.9, 0.6, 0.42, 0.3), (1.0, 0.7, 0.5, 0.36), (0.8, 0.55, 0.4, 0.28, 0.22)),
+    stage_extras=("balls",), default_extras=_funnel_extras,
+    variations={"balls": (45, 80), "restitution": (0.05, 0.6), "friction": (0.1, 0.9), "ball_radius": (0.13, 0.19),
+                "funnel_height": (1.5, 2.2)},
+    stage_variations=((0.8, 0.58, 0.42, 0.32, 0.24), (0.9, 0.6, 0.42, 0.3), (0.85, 0.6, 0.45, 0.35, 0.28, 0.22)),
     events="impulse", stage_meaning="radius of the funnel hole (m); the label shows it in ball widths",
 ))
 
@@ -355,23 +397,25 @@ register(ExperimentTemplate(
     description="Rings are dropped onto a pole; stages shrink the ring hole until it no longer fits over the pole.",
     simulation="rigid_body", objects=("torus",), default_object="torus",
     params={
-        "pole_radius": ParamDef(0.15, 0.05, 0.5, description="pole radius (m)"),
-        "pole_height": ParamDef(1.8, 0.5, 5.0, description="pole height (m)"),
-        "ring_minor": ParamDef(0.1, 0.03, 0.3, description="tube radius of each ring (m)"),
-        "rings": ParamDef(3, 1, 12, kind="int", description="number of rings dropped"),
-        "drop_height": ParamDef(1.2, 0.3, 6.0, description="height of the lowest ring above the pole top (m)"),
+        "pole_radius": ParamDef(0.2, 0.05, 0.5, description="pole radius (m)"),
+        "pole_height": ParamDef(2.0, 0.5, 5.0, description="pole height (m)"),
+        "ring_minor": ParamDef(0.11, 0.03, 0.3, description="tube radius of each ring (m)"),
+        "rings": ParamDef(5, 1, 12, kind="int", description="rings dropped in the FINAL stage (earlier stages drop fewer)"),
+        "arena_radius": ParamDef(1.25, 0.9, 4.0, description="radius of the low wall that keeps rings in frame (m)"),
+        "wall_height": ParamDef(0.9, 0.2, 3.0, description="height of that wall (m)"),
+        "drop_height": ParamDef(1.1, 0.3, 6.0, description="height of the lowest ring above the pole top (m)"),
         "tilt_degrees": ParamDef(8.0, 0.0, 45.0, description="random starting tilt of each ring"),
         "restitution": ParamDef(0.25, 0.0, 0.9),
         "friction": ParamDef(0.5, 0.0, 2.0),
     },
-    stage_param="hole_ratio", stage_def=ParamDef(None, 0.3, 6.0), default_stage_values=(2.5, 1.5, 1.15, 0.85),
-    label="HOLE {hole_ratio}× POLE", label_values=_ring_label,
-    hooks=("WHAT HAPPENS WHEN THE RING GETS SMALLER?", "WILL THE RING STILL FIT THE POLE?",
-           "{rings} {ring_word}. ONE POLE. HOW SMALL CAN THE HOLE GO?"),
-    frame_region=_ring_region, validate=_check_rings,
-    variations={"rings": (2, 6), "drop_height": (0.6, 2.0), "tilt_degrees": (0.0, 20.0), "restitution": (0.05, 0.5),
-                "friction": (0.2, 1.0), "pole_height": (1.2, 2.4)},
-    stage_variations=((2.5, 1.5, 1.15, 0.85), (3.0, 1.8, 1.3, 1.05, 0.8), (2.0, 1.4, 1.1, 0.9)),
+    stage_param="hole_ratio", stage_def=ParamDef(None, 0.3, 6.0), default_stage_values=(2.6, 2.0, 1.5, 1.15, 0.9),
+    label="{ring_size}", label_values=_ring_label,
+    hooks=("HOW SMALL CAN THE RING HOLE GET?", "WILL THE RINGS STILL FIT THE POLE?", "HOW MANY RINGS CAN ONE POLE TAKE?"),
+    frame_region=_ring_region, validate=_check_rings, camera_defaults={"elevation": 16.0},
+    stage_extras=("rings",), default_extras=_ring_extras,
+    variations={"rings": (4, 7), "drop_height": (0.8, 1.8), "tilt_degrees": (0.0, 20.0), "restitution": (0.05, 0.5),
+                "friction": (0.2, 1.0), "pole_height": (1.7, 2.4)},
+    stage_variations=((2.6, 2.0, 1.5, 1.15, 0.9), (2.6, 1.8, 1.3, 1.05, 0.8), (2.6, 1.8, 1.3, 1.0), (2.6, 2.1, 1.7, 1.35, 1.1, 0.85)),
     events="impulse", stage_meaning="ring hole radius as a multiple of the pole radius (<1 cannot slide over the pole)",
 ))
 
@@ -388,10 +432,11 @@ register(ExperimentTemplate(
     },
     stage_param="objects", stage_def=ParamDef(None, 1, 6, kind="int"), default_stage_values=(1, 2, 3, 4),
     label="{objects} {object_word}", label_values=_objects_label,
-    hooks=("WHAT HAPPENS WHEN THE CLOTH MEETS {last} OBJECTS?", "{first} OBJECT VS {last} OBJECTS", "WHICH SHAPE DOES THE CLOTH FIND?"),
+    hooks=("HOW MANY OBJECTS CAN ONE CLOTH COVER?", "WHAT HAPPENS WHEN THE CLOTH MEETS {last} OBJECTS?", "{first} OBJECT VS {last} OBJECTS"),
     frame_region=_objects_region, validate=_check_cloth_objects,
     variations={"cloth_size": (5.0, 7.6), "drop_height": (0.6, 2.0), "object_scale": (0.6, 1.0), "spacing": (2.0, 2.8)},
-    stage_variations=((1, 2, 3, 4), (1, 2, 4), (2, 3, 4, 5)),
+    stage_variations=((1, 2, 3, 4), (1, 2, 3, 4, 5), (1, 2, 4), (2, 3, 4, 5)),
+    material_defaults={"cloth_style": "solid", "cloth_color": [0.93, 0.3, 0.5, 1.0], "cloth_metallic": 0.0, "cloth_roughness": 0.35},
     events="cloth", stage_meaning="number of objects the cloth falls on",
 ))
 

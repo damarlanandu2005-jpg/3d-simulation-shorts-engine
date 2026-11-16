@@ -72,6 +72,23 @@ def plan_batch(experiments: str | list, count: int, master_seed: int, preset: st
     return ordered
 
 
+def load_curated(paths, master_seed: int = 0) -> list:
+    """Hand-designed configs (e.g. configs/curated/*.json) as batch variations: same manifest, QC and retry machinery."""
+    from .variation import Variation
+    out = []
+    for i, path in enumerate(sorted(map(str, paths))):
+        cfg = json.loads(Path(path).read_text())
+        parsed = from_dict(json.loads(json.dumps(cfg)))
+        name = cfg.get("name") or Path(path).stem
+        if any(v.name == name for v in out):
+            raise ConfigError(f"duplicate curated video name {name!r}")
+        shape = getattr(parsed, "shape", None) or parsed.object.type
+        values = list(getattr(parsed, "stage_values", None) or parsed.resolutions)
+        out.append(Variation(name=name, seed=int(cfg.get("seed", 0)), index=i, experiment=parsed.experiment_type, config=cfg,
+                             changed={"curated": Path(path).name}, stage_values=values, shape=shape))
+    return out
+
+
 def write_batch(variations, batch_dir: Path, master_seed: int, preset: str) -> dict:
     """Write configs + variation records + manifest. Refuses to overwrite a different config."""
     batch_dir = Path(batch_dir)
@@ -163,6 +180,7 @@ def run_batch(manifest: dict, batch_dir: Path, render_args: list[str], runner=No
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="shorts_engine.batch", description="Generate a batch of physically different Shorts.")
+    p.add_argument("--curated", help="directory of hand-designed configs to render as a batch (instead of --experiment)")
     p.add_argument("--experiment", default="auto", help=f"name, comma list or 'auto'; available: {', '.join(sorted(TEMPLATES))}")
     p.add_argument("--variations", type=int, default=4)
     p.add_argument("--seed", default="auto", help="master seed or 'auto' (recorded in the manifest)")
@@ -175,7 +193,13 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     try:
         seed = resolve_seed(args.seed)
-        variations = plan_batch(args.experiment, args.variations, seed, args.preset, args.library or [args.out])
+        if args.curated:
+            files = sorted(Path(args.curated).glob("*.json"))
+            if not files:
+                raise ConfigError(f"no *.json configs in {args.curated}")
+            variations = load_curated(files, seed)
+        else:
+            variations = plan_batch(args.experiment, args.variations, seed, args.preset, args.library or [args.out])
         batch_dir = Path(args.out) / f"batch_{seed}"
         manifest = write_batch(variations, batch_dir, seed, args.preset)
     except ConfigError as exc:

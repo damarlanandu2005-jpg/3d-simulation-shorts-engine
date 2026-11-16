@@ -40,6 +40,7 @@ on:
         default: auto
         options:
           - auto
+          - curated
           - multiple_balls
           - ball_funnel
           - ring_toss

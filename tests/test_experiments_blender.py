@@ -118,12 +118,16 @@ def test_multiple_balls_other_shapes_run(tmp_path, shape):
 
 # ------------------------------------------------------------------------------------------ ball_funnel
 def test_funnel_smaller_hole_lets_fewer_balls_through(tmp_path):
-    cfg = write_cfg(tmp_path, "ball_funnel", "sphere", [0.9, 0.3], duration=3.0)
+    cfg = write_cfg(tmp_path, "ball_funnel", "sphere", [0.9, 0.3], params={"balls": 40}, duration=3.0)
+    d = json.loads(Path(cfg).read_text())
+    for st in d["stages"]:                                       # same number of balls in both stages: only the hole differs
+        st["params"]["balls"] = 40
+    Path(cfg).write_text(json.dumps(d))
     through = {}
     for i, tag in enumerate(("stage_00_0p9", "stage_01_0p3")):
         gen(cfg, "--stage", str(i), "--mode", "build")
         pos = inspect(blend_of(tmp_path, "t_ball_funnel", tag), 90)["POS"]
-        through[i] = sum(1 for p in pos.values() if p[2] < 1.2)       # funnel hole is at z = 1.5
+        through[i] = sum(1 for p in pos.values() if p[2] < 0.8)       # funnel hole is at z = 1.0
     assert through[0] >= 30, through
     assert through[1] <= through[0] - 15, f"a 1.7x hole must jam/slow the flow: {through}"
 
@@ -138,6 +142,10 @@ def test_funnel_emits_collision_events(tmp_path):
 # ------------------------------------------------------------------------------------------ ring_toss
 def test_ring_slides_over_pole_only_when_the_hole_is_big_enough(tmp_path):
     cfg = write_cfg(tmp_path, "ring_toss", "torus", [2.5, 0.8], params={"rings": 2, "tilt_degrees": 3.0}, duration=3.0)
+    d = json.loads(Path(cfg).read_text())
+    for st in d["stages"]:                                       # the same two rings in both stages: only the hole differs
+        st["params"]["rings"] = 2
+    Path(cfg).write_text(json.dumps(d))
     state = {}
     for i, tag in enumerate(("stage_00_2p5", "stage_01_0p8")):
         gen(cfg, "--stage", str(i), "--mode", "build")

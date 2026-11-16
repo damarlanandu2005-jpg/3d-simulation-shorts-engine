@@ -58,7 +58,7 @@ def _number(value: Any, path: str, *, positive: bool = False) -> float:
 _TOP_KEYS = {"schema_version", "name", "seed", "experiment", "simulation", "stages", "camera", "material",
              "render", "output", "label", "hook", "video", "audio"}
 _EXPERIMENT_KEYS = {"type", "object", "params"}
-_SIMULATION_KEYS = {"fps", "duration", "physics"}
+_SIMULATION_KEYS = {"fps", "duration", "payoff_duration", "physics"}
 _STAGE_KEYS = {"params", "camera"}
 _HOOK_KEYS = {"seconds", "mode", "text", "text_size", "text_y", "closeup", "window"}
 _VIDEO_KEYS = {"crf", "cards"}
@@ -122,9 +122,13 @@ def experiment_to_legacy(data: dict) -> dict:
 
     sim = _obj(data.get("simulation", {}), "simulation")
     _only(sim, _SIMULATION_KEYS, "simulation")
-    for key in ("fps", "duration"):
+    for key in ("fps", "duration", "payoff_duration"):
         if key in sim:
+            if key == "payoff_duration" and not generic:
+                raise ConfigError(f"simulation.payoff_duration is only available for the newer experiments, not {t.name}")
             out[key] = _number(sim[key], f"simulation.{key}", positive=True)
+            if key == "payoff_duration" and out[key] > 60:
+                raise ConfigError("simulation.payoff_duration must be <= 60 seconds")
     if "physics" in sim:
         physics = _obj(sim["physics"], "simulation.physics")
         _only(physics, {f.name for f in fields(PhysicsCfg)}, "simulation.physics")
@@ -134,16 +138,18 @@ def experiment_to_legacy(data: dict) -> dict:
     if not isinstance(stages, list) or not stages:
         raise ConfigError("stages must be a non-empty list")
     values: list = []
+    extras_list: list[dict] = []
     cameras: list[dict] = []
     for i, st in enumerate(stages):
         path = f"stages[{i}]"
         st = _obj(st, path)
         _only(st, _STAGE_KEYS, path)
         sp = _obj(st.get("params", {}), f"{path}.params")
-        _only(sp, {t.stage_param}, f"{path}.params")
+        _only(sp, {t.stage_param, *t.stage_extras}, f"{path}.params")
         if t.stage_param not in sp:
             raise ConfigError(f"{path}.params.{t.stage_param} is required for {t.name} ({t.stage_meaning})")
         values.append(t.check_stage_value(sp[t.stage_param], f"{path}.params.{t.stage_param}"))
+        extras_list.append({k: t.params[k].check(v, f"{path}.params.{k}") for k, v in sp.items() if k != t.stage_param})
         cam = _obj(st.get("camera", {}), f"{path}.camera")
         _only(cam, set(_CAMERA_OVERRIDE_KEYS), f"{path}.camera")
         for key, value in cam.items():
@@ -151,6 +157,10 @@ def experiment_to_legacy(data: dict) -> dict:
         cameras.append(dict(cam))
     if generic:
         out["stage_values"] = values
+        if t.default_extras is not None and not any(extras_list):
+            extras_list = t.default_extras(resolved, values)       # the template's own escalation for this progression
+        if any(extras_list):
+            out["stage_extras"] = extras_list
     else:
         out["resolutions"] = values
     while cameras and not cameras[-1]:                       # trailing empty overrides mean "use the base camera"
@@ -197,10 +207,14 @@ def experiment_to_legacy(data: dict) -> dict:
     if generic:                                              # experiment-specific defaults the file did not set
         out.setdefault("label", {}).setdefault("template", t.label)
         if "size" not in out["label"]:                       # long labels shrink so they stay inside the 9:16 frame
-            longest = max(len(t.label.format(**{**resolved, t.stage_param: v, **t.label_values(resolved, v)}))
-                          if out["label"]["template"] == t.label else 0 for v in values)
-            if longest > 13:
-                out["label"]["size"] = round(0.2 * 13 / longest, 3)
+            extras = out.get("stage_extras", [])
+            longest = max(len(t.label.format(**{**resolved, **(extras[i] if i < len(extras) else {}), t.stage_param: v,
+                                                **t.label_values({**resolved, **(extras[i] if i < len(extras) else {})}, v)}))
+                          if out["label"]["template"] == t.label else 0 for i, v in enumerate(values))
+            if longest > 10:                                 # 10 characters fill the 9:16 frame at the default size
+                out["label"]["size"] = round(0.2 * 10 / longest, 3)
+        for k, v in {"background_color": [0.55, 0.63, 0.76, 1.0], **t.material_defaults}.items():   # clean studio look
+            out.setdefault("material", {}).setdefault(k, v)
         out["camera_preset"] = out.get("camera_preset", "wide")
         out.setdefault("hook_window", "start" if t.simulation == "rigid_body" else "end")
         out_video = out.setdefault("video", {})
@@ -209,11 +223,13 @@ def experiment_to_legacy(data: dict) -> dict:
         out_video.setdefault("hook_seconds", 2.0)
         hook_closeup = out_video["hook"].setdefault("closeup", {})
         if not hook_closeup:
-            last = t.frame_region(resolved, values[-1])
+            last = t.frame_region({**resolved, **(out.get("stage_extras") or [{}])[-1]}, values[-1])
             from .camera_rig import fit_camera
-            fit = fit_camera(last.half_width, last.top, last.bottom, "close", out.get("camera", {}).get("focal_length", 50.0),
-                             elevation=t.camera_defaults.get("elevation"))
-            hook_closeup.update(distance_start=round(fit["distance"] * 1.25, 3), distance_end=fit["distance"],
+            # the hook is the extreme result with the question above it: frame it like a stage (text stays off the action)
+            # and push in slowly
+            fit = fit_camera(last.half_width, last.top, last.bottom, "wide", out.get("camera", {}).get("focal_length", 50.0),
+                             elevation=t.camera_defaults.get("elevation"), label_margin=1.45)    # room for the 2-3 line question
+            hook_closeup.update(distance_start=round(fit["distance"] * 1.1, 3), distance_end=round(fit["distance"] * 0.92, 3),
                                 height=fit["height"], target_z=fit["target_z"])
     return out
 
@@ -229,6 +245,8 @@ def to_experiment_dict(cfg: Config) -> dict:
     stages = []
     for i, v in enumerate(values):
         stage: dict = {"params": {t.stage_param: v}}
+        if generic and i < len(cfg.stage_extras):
+            stage["params"].update(cfg.stage_extras[i])
         if i < len(per_stage) and per_stage[i]:
             stage["camera"] = per_stage[i]
         stages.append(stage)
@@ -246,7 +264,8 @@ def to_experiment_dict(cfg: Config) -> dict:
         "name": cfg.name,
         "seed": cfg.seed,
         "experiment": {"type": t.name, "object": shape, "params": params},
-        "simulation": {"fps": cfg.fps, "duration": cfg.duration, "physics": d["physics"]},
+        "simulation": {"fps": cfg.fps, "duration": cfg.duration, "physics": d["physics"],
+                       **({"payoff_duration": cfg.payoff_duration} if generic and cfg.payoff_duration else {})},
         "stages": stages,
         "camera": camera,
         "material": d["material"],

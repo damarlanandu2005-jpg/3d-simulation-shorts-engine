@@ -183,6 +183,10 @@ class Config:
     def frame_count(self) -> int:
         return max(1, round(self.duration * self.fps))
 
+    def stage_frames(self, index: int) -> int:
+        """Frames shown for stage ``index`` (every stage has ``frame_count`` frames unless an experiment sets a longer payoff)."""
+        return self.frame_count
+
     @property
     def root_dir(self) -> Path:
         return Path(self.output.dir) / self.name
@@ -290,6 +294,22 @@ class ExperimentConfig(Config):
     camera_preset: str = "wide"                       # wide | close | top | side | manual (use camera.* as written)
     camera_motion: str = "static"                     # static | push_in | follow | impact
     hook_window: str = "start"                        # which part of the last stage the hook replays: start | end
+    stage_extras: list = field(default_factory=list)  # per-stage overrides of other experiment params (e.g. {"balls": 30})
+    payoff_duration: float = 0.0                      # seconds of the final (payoff) stage; 0 = same as ``duration``
+
+    @property
+    def frame_count(self) -> int:                     # the simulation is baked for the longest stage (the final one)
+        return max(1, round(max(self.duration, self.payoff_duration) * self.fps))
+
+    def stage_frames(self, index: int) -> int:
+        if self.payoff_duration > 0 and index == len(self.stage_values) - 1:
+            return max(1, round(self.payoff_duration * self.fps))
+        return max(1, round(self.duration * self.fps))
+
+    def stage_params(self, index: int) -> dict:
+        """Experiment params in force for stage ``index``: the shared params plus that stage's overrides."""
+        extra = self.stage_extras[index] if index < len(self.stage_extras) else {}
+        return {**self.params, **extra}
 
     @property
     def template(self):
@@ -316,8 +336,13 @@ class ExperimentConfig(Config):
         resolved = t.resolve_params(self.params)
         for i, v in enumerate(self.stage_values):
             t.check_stage_value(v, f"stages[{i}].params.{t.stage_param}")
+        if self.stage_extras and len(self.stage_extras) != len(self.stage_values):
+            raise ConfigError("stage_extras must have one entry per stage")
+        if self.payoff_duration and self.payoff_duration < self.duration:
+            raise ConfigError("simulation.payoff_duration must be >= simulation.duration (the final stage is the longest)")
         if t.validate is not None:                      # cross-parameter checks: reject broken scenes instead of rendering them
-            t.validate(resolved, list(self.stage_values), self.shape)
+            for i in range(len(self.stage_values)):
+                t.validate(t.resolve_params(self.stage_params(i)), list(self.stage_values), self.shape)
         if self.camera_preset not in PRESETS + ("manual",):
             raise ConfigError(f"camera.preset must be one of {PRESETS + ('manual',)}, got {self.camera_preset!r}")
         if self.hook_window not in ("start", "end"):
@@ -330,22 +355,24 @@ class ExperimentConfig(Config):
         out = []
         for i, v in enumerate(self.stage_values):
             tag = f"stage_{i:02d}_{value_tag(v)}"
-            out.append(Stage(index=i, faces=0, segments=0, label=self.stage_label(v),
+            out.append(Stage(index=i, faces=0, segments=0, label=self.stage_label(v, i),
                              blend_path=root / tag / f"{tag}.blend", frames_dir=root / tag / "frames",
-                             clip_path=root / tag / f"{tag}.mp4", params={t.stage_param: v}))
+                             clip_path=root / tag / f"{tag}.mp4", params={**(self.stage_extras[i] if i < len(self.stage_extras) else {}),
+                                                                           t.stage_param: v},
+                             frames=self.stage_frames(i)))
         return out
 
     def check_label(self) -> None:
-        for v in self.stage_values:
-            self.stage_label(v)
+        for i, v in enumerate(self.stage_values):
+            self.stage_label(v, i)
 
     def hook_frame_range(self) -> tuple[int, int]:
         n = min(self.frame_count, max(1, round(self.video.hook_seconds * self.fps)))
         return (1, n) if self.hook_window == "start" else (self.frame_count - n + 1, self.frame_count)
 
-    def stage_label(self, value) -> str:
+    def stage_label(self, value, index: int | None = None) -> str:
         t = self.template
-        p = {**self.params, "shape": self.shape}
+        p = {**(self.stage_params(index) if index is not None else self.params), "shape": self.shape}
         return self.label.template.format(**{**p, t.stage_param: value, **t.label_values(p, value)})
 
     def cards(self) -> list["Card"]:
@@ -357,14 +384,16 @@ class ExperimentConfig(Config):
         if text in ("", "auto"):
             return
         try:
-            text.format(**t.hook_values({**t.resolve_params(self.params), "shape": self.shape}, self.stage_values or [1]))
+            text.format(**t.hook_values({**t.resolve_params(self.stage_params(len(self.stage_values) - 1)), "shape": self.shape},
+                                        self.stage_values or [1]))
         except (KeyError, IndexError, ValueError, ZeroDivisionError) as exc:
             raise ConfigError(f"video.hook.text is invalid for {t.name} (allowed placeholders: "
                               f"{sorted(t.hook_values({**t.resolve_params(self.params), 'shape': self.shape}, [1, 2]))}): {exc!r}") from exc
 
     def hook_text(self) -> str:
         t = self.template
-        vals = t.hook_values({**self.params, "shape": self.shape}, self.stage_values)
+        vals = t.hook_values({**self.stage_params(len(self.stage_values) - 1), "shape": self.shape}, self.stage_values,
+                             {**self.stage_params(0), "shape": self.shape})
         text = self.video.hook.text
         if text == "auto":
             text = t.hooks[self.seed % len(t.hooks)]
@@ -380,7 +409,7 @@ class ExperimentConfig(Config):
             return replace(self.camera, per_stage=[], **override)
         from .camera_rig import fit_camera
         t = self.template
-        region = t.frame_region(self.params, self.stage_values[index])
+        region = t.frame_region(self.stage_params(index), self.stage_values[index])
         fit = fit_camera(region.half_width, region.top, region.bottom, self.camera_preset, self.camera.focal_length,
                          elevation=t.camera_defaults.get("elevation"))
         return replace(self.camera, per_stage=[], **{**fit, **override})
@@ -412,6 +441,7 @@ class Stage:
     frames_dir: Path
     clip_path: Path
     params: dict = field(default_factory=dict)   # experiment-specific stage parameters (e.g. {"balls": 50})
+    frames: int = 0                              # frames shown for this stage (0 = the config's frame_count)
 
 
 def faces_to_segments(faces: int) -> int:

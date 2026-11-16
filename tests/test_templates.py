@@ -34,7 +34,8 @@ def test_default_config_for_every_template_resolves(exp):
     assert cfg.stage_count == len(t.default_stage_values) == len(cfg.stages())
     assert cfg.simulation == t.simulation
     assert set(cfg.params) == set(t.params)
-    assert all(st.params == {t.stage_param: v} for st, v in zip(cfg.stages(), t.default_stage_values))
+    assert all(st.params[t.stage_param] == v and set(st.params) <= {t.stage_param, *t.stage_extras}
+               for st, v in zip(cfg.stages(), t.default_stage_values))
     assert len({st.blend_path for st in cfg.stages()}) == cfg.stage_count          # unique paths per stage
 
 
@@ -52,15 +53,15 @@ def test_labels_and_hooks_describe_the_experiment(exp):
 
 def test_balls_labels_and_dynamic_hook():
     cfg = from_dict(doc("multiple_balls", hook={"text": "WHAT HAPPENS WHEN WE DROP {last} BALLS?", "mode": "closeup", "seconds": 2}))
-    assert [s.label for s in cfg.stages()] == ["1 BALL", "10 BALLS", "50 BALLS", "100 BALLS"]
+    assert [s.label for s in cfg.stages()] == ["5 BALLS", "15 BALLS", "30 BALLS", "60 BALLS", "100 BALLS"]
     assert cfg.hook_text().replace("\n", " ") == "WHAT HAPPENS WHEN WE DROP 100 BALLS?"
     assert max(len(line) for line in cfg.hook_text().split("\n")) <= 16, "long questions wrap to fit the frame"
 
 
 def test_hook_depends_on_the_actual_experiment_numbers():
     d = doc("multiple_balls", hook={"text": "{first} VS {last}", "mode": "closeup", "seconds": 2})
-    d["stages"] = [{"params": {"balls": 3}}, {"params": {"balls": 300}}]
-    assert from_dict(d).hook_text() == "3 VS 300"
+    d["stages"] = [{"params": {"balls": 3}}, {"params": {"balls": 90}}]
+    assert from_dict(d).hook_text() == "3 VS 90"
 
 
 def test_auto_hook_rotates_with_seed():
@@ -152,7 +153,7 @@ def test_camera_preset_and_motion_validation():
 def test_stage_label_template_validation():
     with pytest.raises(ConfigError, match="label.template"):
         from_dict(doc("multiple_balls", label={"template": "{faces_short} FACES"}))
-    assert from_dict(doc("multiple_balls", label={"template": "N={balls}"})).stages()[1].label == "N=10"
+    assert from_dict(doc("multiple_balls", label={"template": "N={balls}"})).stages()[1].label == "N=15"
 
 
 def test_physics_and_seed_validation_still_apply():
@@ -257,7 +258,7 @@ def test_fitted_camera_keeps_the_region_in_frame(exp, preset):
 def test_camera_for_stage_uses_preset_and_overrides_and_manual():
     cfg = from_dict(doc("multiple_balls", camera={"preset": "wide"}))
     near, far = cfg.camera_for_stage(0), cfg.camera_for_stage(3)
-    assert far.target_z > near.target_z, "more balls = taller stack = camera aims higher"
+    assert far.target_z == near.target_z, "the container is fixed, so the framing is the same for every stage"
     cfg = from_dict(doc("multiple_balls"))
     cfg.stages()
     d = doc("multiple_balls"); d["stages"][1]["camera"] = {"distance": 20.0}

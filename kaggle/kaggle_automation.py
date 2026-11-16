@@ -101,6 +101,12 @@ def validate_batch(experiment: str, variations, seed, preset: str, root: Path = 
         from shorts_engine.templates import TEMPLATES
     finally:
         sys.path.remove(str(root))
+    if experiment == "curated":                       # the hand-designed configs committed in configs/curated/
+        if not 0 <= int(seed) <= 999_999:
+            raise AutomationError("batch seed must be between 0 and 999999")
+        if not any((root / "configs" / "curated").glob("*.json")):
+            raise AutomationError("no configs/curated/*.json in this checkout")
+        return {"experiment": "curated", "variations": 1, "seed": int(seed), "preset": preset}
     if experiment != "auto" and experiment not in TEMPLATES:
         raise AutomationError(f"batch experiment must be 'auto' or one of {sorted(TEMPLATES)}, got {experiment!r}")
     try:
@@ -213,8 +219,12 @@ try:
     if BATCH is None:
         cmd = [py, "-m", "shorts_engine.render", "--config", CONFIG, "--use-bpy"]
     else:
-        cmd = [py, "-m", "shorts_engine.batch", "--experiment", BATCH["experiment"], "--variations", str(BATCH["variations"]),
-               "--seed", str(BATCH["seed"]), "--preset", BATCH["preset"], "--out", "output/batches", "--run", "--use-bpy"]
+        if BATCH["experiment"] == "curated":
+            cmd = [py, "-m", "shorts_engine.batch", "--curated", "configs/curated", "--seed", str(BATCH["seed"]),
+                   "--out", "output/batches", "--run", "--use-bpy"]
+        else:
+            cmd = [py, "-m", "shorts_engine.batch", "--experiment", BATCH["experiment"], "--variations", str(BATCH["variations"]),
+                   "--seed", str(BATCH["seed"]), "--preset", BATCH["preset"], "--out", "output/batches", "--run", "--use-bpy"]
         info["batch"] = BATCH
     with open(RESULT / "render.log", "w") as logf:
         proc = subprocess.Popen(cmd, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

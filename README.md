@@ -449,3 +449,20 @@ public repo, so the commit must be pushed to GitHub before running.
 GitHub Actions run 43764859046 (artifact `kaggle-baseline-43764859046`): 6 videos rendered, all passed QC (h264 + aac, 720x1280, 14-17 s), 4110 s wall time, 54.9 MB total.
 cloth_drape, multiple_balls, ball_funnel (x2), ring_toss, cloth_objects. Per-video times were 585-812 s.
 Invalid parameter combinations are rejected at config load; a failed video is retried once with a safe (cheaper, static-camera) configuration and both attempts are recorded in `manifest.json`.
+
+## Escalation stories (V1.2)
+
+Every experiment tells one question as an escalation: QUESTION -> SETUP -> ESCALATION -> EXTREME -> PAYOFF.
+See `docs/DESIGN_CHECKLIST.md` for the design rules.
+
+- **3-6 stages** per experiment (`stages[]`); the number is a property of the experiment, not of the engine.
+- **Several parameters can escalate together.** `stages[].params` takes the template's stage parameter plus the
+  template's `stage_extras` (ball_funnel: `balls`; ring_toss: `rings`). When a stage does not give them, the template ramps
+  them up to the final value (`experiment.params.balls` / `rings`).
+- **Payoff stage:** `simulation.payoff_duration` gives the final stage more simulation time than the others
+  (`simulation.duration`). The hook replays this stage, so the extreme result is also the first thing viewers see.
+- **Look:** new experiments use a seamless studio backdrop (shadow-catcher floor), solid cloth and short labels
+  (`60 BALLS`, `SNUG RING`); `material` in the config overrides it. `cloth_drape` keeps its golden V1 look.
+- **Curated batches:** put hand-designed configs in `configs/curated/` and run
+  `python -m shorts_engine.batch --curated configs/curated --seed 1 --run --use-bpy`, or dispatch the Kaggle workflow with
+  `batch_experiment=curated`. Same manifest, QC, no-overwrite and safe-config retry as generated batches.

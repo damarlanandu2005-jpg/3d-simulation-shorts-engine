@@ -51,10 +51,10 @@ def test_jar_packing_fills_gaps_without_spilling(tmp_path):
     p, cfg = small_cfg(tmp_path, "jar_packing", 19.5)
     gen(p, "--stage", "0", "--mode", "build")
     m = markers(cfg.stages()[0].blend_path)
-    assert m["outside_jar"] == 0 and m["above_rim"] <= 6
+    assert m["outside_jar"] == 0 and m["above_rim"] == 0 and m["heap_on_top"] <= 3     # nothing piled on top of the rim
     levels = m["fill_levels"]
     # the jar looks full after the large rocks; the later pours fit in the gaps and the level never climbs far past the rim
-    assert len(levels) == 4 and max(levels) - levels[0] < 0.3 and max(levels) < 2.2 + 0.35
+    assert len(levels) == 4 and max(levels) < 2.2 + 0.1 and levels[-1] < levels[0] - 0.1
     assert m["added"] == 36 + 110 + 260 and m["label_schedule"][-2][1].startswith("406")
     assert len(m["camera_path"]) >= 5
 

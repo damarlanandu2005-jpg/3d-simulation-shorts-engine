@@ -814,7 +814,7 @@ def build_sheet_reveal_stage(scene, cfg, stage):
 
 
 # ---- jar packing
-_POUR_COLORS = [(0.10, 0.32, 0.95, 1), (1.0, 0.38, 0.08, 1), (1.0, 0.84, 0.10, 1), (0.85, 1.0, 1.0, 1)]
+_POUR_COLORS = [(0.10, 0.32, 0.95, 1), (1.0, 0.38, 0.08, 1), (1.0, 0.84, 0.10, 1), (0.04, 0.85, 0.75, 1)]
 
 
 def orbit_key(frame, target, dist, elev_deg, az_deg=0.0):
@@ -848,11 +848,19 @@ def build_jar_stage(scene, cfg, stage):
     make_rigid(guard, "PASSIVE", "MESH", p["friction"], p["restitution"])
     guard.hide_render = True
     rim_mat = materials.principled("RimMat", (0.9, 0.96, 1.0, 1.0), 0.0, 0.08)
+    parts = [wall, guard]
+    bpy.ops.mesh.primitive_cylinder_add(radius=R, depth=0.2, vertices=64, location=(0, 0, -0.1))
+    disk = bpy.context.active_object                  # the jar's own bottom: lets the whole jar be tapped without moving the floor
+    disk.name = "JarBase"
+    make_rigid(disk, "PASSIVE", "BOX", p["friction"], p["restitution"])
+    disk.hide_render = True
+    parts.append(disk)
     for name, z in (("Rim", H), ("Base", 0.02)):
         bpy.ops.mesh.primitive_torus_add(major_radius=R + 0.06, minor_radius=0.04, major_segments=64, minor_segments=12, location=(0, 0, z))
         ring = bpy.context.active_object
         ring.name = name
         materials.assign(ring, rim_mat)
+        parts.append(ring)
     far = R * 14                       # later pours wait far to the side and are moved into place just before they are released
     actives, starts, ends = [], [], []
     ball_index = 0
@@ -894,6 +902,29 @@ def build_jar_stage(scene, cfg, stage):
             release_at(obj, release)
             actives.append(obj)
             ball_index += 1
+    if p["tap"] > 0:                       # tap the jar after every pour: real rigid-body settling (vertical hops + a little sway)
+        for part in parts:
+            if part.rigid_body is not None:
+                part.rigid_body.kinematic = True
+        base = {id(part): tuple(part.location) for part in parts}
+        taps = []
+        for k in range(len(ends)):
+            taps.append((ends[k] + 8, ends[k] + 8 + round(p["tap_seconds"] * cfg.fps)))
+        for t0, t1 in taps:
+            for f in range(t0, min(t1, cfg.frame_count - 2), 2):
+                up = ((f - t0) // 2) % 2 == 0
+                for part in parts:
+                    x, y, z = base[id(part)]
+                    part.location = (x + (0.25 * p["tap"] if up else -0.25 * p["tap"]), y, z + (p["tap"] if up else 0.0))
+                    part.keyframe_insert("location", frame=f)
+            for part in parts:                               # back to rest after the taps
+                part.location = base[id(part)]
+                part.keyframe_insert("location", frame=min(t1, cfg.frame_count - 1))
+        for part in parts:
+            if part.animation_data and part.animation_data.action:
+                for fc in part.animation_data.action.fcurves:
+                    for kp in fc.keyframe_points:
+                        kp.interpolation = "LINEAR"
     set_markers(scene, {"pour_starts": starts, "pour_ends": ends, "jar_height": H, "jar_radius": R, "pours": len(pours),
                         "added": sum(c for _, c in pours[1:])})
     return actives
@@ -916,8 +947,8 @@ def _jar_camera(cfg, markers, frames) -> list:
             orbit_key(full, (0, 0, H * 0.72), wide * 0.74, 24, 10),            # push in, look down into the gaps
             orbit_key(s1 + int(cfg.fps * 0.5), (0, 0, H * 0.72), wide * 0.7, 26, 14),
             orbit_key(last, (0, 0, H * 0.55), wide * 0.76, 15, 22),
-            orbit_key(frames - int(cfg.fps * 1.5), (0, 0, H * 0.5), wide * 0.72, 7, 28),   # the whole packed jar, label on
-            orbit_key(frames, (0, 0, H * 0.42), wide * 0.36, 4, 36)]           # then straight into the packing through the glass
+            orbit_key(frames - int(cfg.fps * 1.8), (0, 0, H * 0.5), wide * 0.7, 7, 16),    # the whole packed jar, label on
+            orbit_key(frames, (0, 0, H * 0.46), wide * 0.58, 5, 26)]           # then a steady, sharp look through the glass at the packing
     return sorted({k[0]: k for k in keys}.values(), key=lambda k: k[0])
 
 
@@ -939,6 +970,7 @@ def after_bake_jar(scene, cfg, stage, handle) -> dict:
         levels.append(round(zs[int(len(zs) * 0.97)] if zs else 0.0, 3))          # settled surface: 97th percentile of resting stones
     scene.frame_set(frames)
     over = sum(1 for o in handle if o.location.z - o["radius"] > markers["jar_height"] * 1.0)
+    heap = sum(1 for o in handle if o.location.z > markers["jar_height"] - 0.02)        # centres at or above the rim: sitting on top
     outside = sum(1 for o in handle if math.hypot(o.location.x, o.location.y) > markers["jar_radius"] + 0.05)
     scene.frame_set(1)
     path = _jar_camera(cfg, markers, frames)
@@ -948,7 +980,7 @@ def after_bake_jar(scene, cfg, stage, handle) -> dict:
         schedule.append([starts[1] - 2, ""])
         schedule.append([final_at, f"{markers['added']} MORE\nFIT INSIDE"])
         schedule.append([frames - round(cfg.fps * 1.5), ""])               # the last close-up is left to the picture
-    result = {"fill_levels": levels, "jar_height": markers["jar_height"], "above_rim": over, "outside_jar": outside}
+    result = {"fill_levels": levels, "jar_height": markers["jar_height"], "above_rim": over, "heap_on_top": heap, "outside_jar": outside}
     markers.update(result)
     markers["label_schedule"] = schedule
     markers["camera_path"] = path

@@ -588,6 +588,8 @@ register(ExperimentTemplate(
         "full_hold": ParamDef(1.5, 0.0, 6.0, description="extra seconds the jar is left looking full before the second pour"),
         "friction": ParamDef(0.6, 0.0, 2.0),
         "restitution": ParamDef(0.03, 0.0, 0.9),
+        "tap": ParamDef(0.05, 0.0, 0.2, description="height of the little hops the jar makes when it is tapped after a pour (m); 0 = no tapping"),
+        "tap_seconds": ParamDef(1.2, 0.2, 4.0, description="how long the jar is tapped after each pour (s)"),
     },
     stage_param="pours", stage_def=ParamDef(None, 2, 4, kind="int"), default_stage_values=(4,),
     label="IS THIS JAR\nREALLY FULL?", label_values=_jar_label,

@@ -243,14 +243,6 @@ jobs:
             echo "CONTACT_SHEET_BEGIN $name duration=$dur"
             base64 -w 0 "$RUNNER_TEMP/$name.jpg"; echo
             echo "CONTACT_SHEET_END $name"
-            ffmpeg -v error -y -ss "$(python3 -c "print(max(0,$dur-4.0))")" -i "$mp4" -vf "fps=2,scale=270:-2,tile=4x2" -frames:v 1 -q:v 3 "$RUNNER_TEMP/${name}_end.jpg"
-            echo "CONTACT_SHEET_BEGIN ${name}_end duration=$dur"
-            base64 -w 160 "$RUNNER_TEMP/${name}_end.jpg"
-            echo "CONTACT_SHEET_END ${name}_end"
-            ffmpeg -v error -y -t 2.4 -i "$mp4" -vf "fps=2.5,scale=270:-2,tile=6x1" -frames:v 1 -q:v 3 "$RUNNER_TEMP/${name}_start.jpg"
-            echo "CONTACT_SHEET_BEGIN ${name}_start duration=$dur"
-            base64 -w 160 "$RUNNER_TEMP/${name}_start.jpg"
-            echo "CONTACT_SHEET_END ${name}_start"
           done
 
       - name: Upload diagnostics on failure
@@ -285,4 +277,12 @@ jobs:
             echo "CONTACT_SHEET_BEGIN $name duration=$dur"
             base64 -w 160 "$RUNNER_TEMP/$name.jpg"
             echo "CONTACT_SHEET_END $name"
+            ffmpeg -v error -y -ss "$(python3 -c "print(max(0,$dur-4.0))")" -i "$mp4" -vf "fps=2,scale=270:-2,tile=4x2" -frames:v 1 -q:v 3 "$RUNNER_TEMP/${name}_end.jpg"
+            echo "CONTACT_SHEET_BEGIN ${name}_end duration=$dur"
+            base64 -w 160 "$RUNNER_TEMP/${name}_end.jpg"
+            echo "CONTACT_SHEET_END ${name}_end"
+            ffmpeg -v error -y -t 2.4 -i "$mp4" -vf "fps=2.5,scale=270:-2,tile=6x1" -frames:v 1 -q:v 3 "$RUNNER_TEMP/${name}_start.jpg"
+            echo "CONTACT_SHEET_BEGIN ${name}_start duration=$dur"
+            base64 -w 160 "$RUNNER_TEMP/${name}_start.jpg"
+            echo "CONTACT_SHEET_END ${name}_start"
           done

@@ -224,6 +224,21 @@ jobs:
           path: ${{ env.RESULT_DIR }}
           if-no-files-found: error
 
+      - name: Print contact sheets of the final videos (visual review from the job log)
+        # Plain log output, no extra permissions: 12 evenly spaced frames of each FINAL mp4 as one base64 JPEG per video,
+        # so the real rendered pixels can be inspected after the run (not only ffprobe/QC).
+        run: |
+          set -euo pipefail
+          DIR=kaggle_out; [ -d kaggle_out/result ] && DIR=kaggle_out/result
+          for mp4 in $(find "$DIR" -mindepth 2 -maxdepth 2 -name '*.mp4' ! -name '*_silent.mp4' ! -name 'hook.mp4'); do
+            name=$(basename "$mp4" .mp4)
+            dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
+            ffmpeg -v error -y -i "$mp4" -vf "fps=12/${dur},scale=240:-2,tile=6x2" -frames:v 1 -q:v 5 "$RUNNER_TEMP/$name.jpg"
+            echo "CONTACT_SHEET_BEGIN $name duration=$dur"
+            base64 -w 0 "$RUNNER_TEMP/$name.jpg"; echo
+            echo "CONTACT_SHEET_END $name"
+          done
+
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

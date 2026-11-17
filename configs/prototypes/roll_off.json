@@ -8,20 +8,12 @@
  },
  "simulation": {
   "fps": 30,
-  "duration": 7.0,
-  "payoff_duration": 7.0
+  "duration": 16.5
  },
  "stages": [
   {
    "params": {
-    "incline": 14
-   }
-  },
-  {
-   "params": {
-    "incline": 18,
-    "ramp_friction": 0.0,
-    "friction": 0.0
+    "incline": 22
    }
   }
  ],
@@ -47,6 +39,12 @@
   "mode": "none"
  },
  "label": {
-  "size": 0.15
+  "size": 0.15,
+  "color": [
+   1,
+   1,
+   1,
+   1
+  ]
  }
 }

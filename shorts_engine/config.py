@@ -61,6 +61,7 @@ class MaterialCfg:
     cloth_style: str = "wireframe"  # "wireframe" shows the mesh density; "solid" is plain cloth
     ground_color: list = field(default_factory=lambda: [0.45, 0.45, 0.47, 1.0])
     background_color: list = field(default_factory=lambda: [0.72, 0.72, 0.74, 1.0])
+    look: str = "classic"   # "studio": dark gradient backdrop, glossy reflective floor, key + rim lights (SimMorph prototype look)
 
 
 @dataclass
@@ -563,6 +564,8 @@ def validate(cfg: Config) -> Config:
         raise ConfigError("render.samples must be >= 1")
     if cfg.material.cloth_style not in SUPPORTED_CLOTH_STYLES:
         raise ConfigError(f"material.cloth_style must be one of {SUPPORTED_CLOTH_STYLES}")
+    if cfg.material.look not in ("classic", "studio"):
+        raise ConfigError("material.look must be 'classic' or 'studio'")
     for name in ("object_color", "cloth_color", "ground_color", "background_color"):
         _check_color(f"material.{name}", getattr(cfg.material, name))
     _check_color("label.color", cfg.label.color)

@@ -445,10 +445,11 @@ register(ExperimentTemplate(
 
 # ---------------------------------------------------------------------------------------------- story experiments
 # Race / mystery / packing: one central question per video, answered by the physics (not a parameter ramp).
+STUDIO_LOOK = {"look": "studio", "background_color": [0.08, 0.11, 0.26, 1.0], "ground_color": [0.06, 0.08, 0.15, 1.0]}
 RACE_SHAPES = ("sphere", "ring", "can", "prism", "cone", "cube")      # lane order, left to right
 RACE_NAMES = {"sphere": "SPHERE", "ring": "RING", "can": "CAN", "prism": "PRISM", "cone": "CONE", "cube": "CUBE"}
-HIDDEN_OBJECTS = ("snowman", "pyramid", "tower")
-HIDDEN_NAMES = {"snowman": "A SNOWMAN", "pyramid": "A PYRAMID", "tower": "A TOWER"}
+HIDDEN_OBJECTS = ("mixed", "trio")
+HIDDEN_NAMES = {"mixed": "3 BALLS AND A CUBE", "trio": "THREE BALLS"}
 
 
 def race_geometry(p: dict) -> dict:
@@ -464,7 +465,7 @@ def _race_label(p, incline):
 
 def _race_region(p, incline):
     g = race_geometry({**p, "incline": incline})
-    return Region(half_width=g["width"] / 2 + 0.2, top=g["rise"] + 0.6, half_depth=g["run"] / 2 + 1.0)
+    return Region(half_width=g["width"] / 2 + 0.2, top=g["rise"] + 0.6, half_depth=(g["run"] + p["arena_length"]) / 2 + 1.0)
 
 
 def _check_race(p, stages, shape):
@@ -510,61 +511,62 @@ def _hidden_label(p, hidden):
 
 
 def _hidden_region(p, hidden):
-    h = {"snowman": 3.9, "pyramid": 3.2, "tower": 4.4}[hidden]
-    return Region(half_width=p["cloth_size"] / 2 * 0.5, top=h + 0.5)
+    return Region(half_width=2.5, top=2.0)
 
 
 def _check_sheet(p, stages, shape):
     for hidden in stages:
-        h = {"snowman": 4.2, "pyramid": 3.2, "tower": 4.4}[hidden]
-        if p["cloth_size"] < 1.55 * (h / 1.7):
-            _fail(f"cloth_size {p['cloth_size']} is too small to cover a {hidden} ({h} m tall)")
+        if p["cloth_size"] < 6.0:
+            _fail(f"cloth_size {p['cloth_size']} is too small to cover the pen the {hidden} shapes move in (needs >= 6 m)")
         if p["reveal_seconds"] <= 0 or p["reveal_start"] <= 0:
             _fail("reveal_start and reveal_seconds must be > 0")
 
 
 register(ExperimentTemplate(
     name="roll_off",
-    description="Six different shapes are released together on one lane-divided ramp: which reaches the bottom first?",
+    description="Six different shapes are released together on one shared ramp that runs out into a long arena: which rolls farthest?",
     simulation="rigid_body", objects=("mixed",), default_object="mixed",
     params={
-        "shape_size": ParamDef(0.42, 0.15, 0.6, description="characteristic radius of every racer (m)"),
-        "lane_width": ParamDef(1.0, 0.5, 2.0, description="width of each of the six lanes (m)"),
-        "ramp_length": ParamDef(10.0, 4.0, 20.0, description="length of the ramp along its slope (m)"),
-        "ramp_friction": ParamDef(0.4, 0.0, 2.0, description="friction of the ramp surface"),
-        "friction": ParamDef(0.4, 0.0, 2.0, description="friction of the racers"),
+        "shape_size": ParamDef(0.5, 0.15, 0.7, description="characteristic radius of every racer (m)"),
+        "lane_width": ParamDef(1.1, 0.5, 2.0, description="spacing between racers at the start line (m)"),
+        "ramp_length": ParamDef(7.5, 4.0, 20.0, description="length of the ramp along its slope (m)"),
+        "arena_length": ParamDef(16.0, 6.0, 40.0, description="length of the flat arena after the ramp (m)"),
+        "ramp_friction": ParamDef(0.5, 0.0, 2.0, description="friction of the ramp surface"),
+        "floor_friction": ParamDef(0.5, 0.0, 2.0, description="friction of the arena floor"),
+        "friction": ParamDef(0.5, 0.0, 2.0, description="friction of the racers"),
         "restitution": ParamDef(0.12, 0.0, 0.9),
-        "release_delay": ParamDef(1.1, 0.2, 6.0, description="seconds the racers are held at the start line"),
-        "finish_hold": ParamDef(2.2, 0.5, 10.0, description="seconds shown after the winner crosses the line"),
+        "damping": ParamDef(0.35, 0.0, 2.0, description="linear and angular damping: how quickly rolling shapes lose speed (1/s)"),
+        "release_delay": ParamDef(1.2, 0.2, 6.0, description="seconds the racers are held at the start line"),
     },
-    stage_param="incline", stage_def=ParamDef(None, 6, 40), default_stage_values=(17.0,),
-    label="WHICH ONE\nWINS?", label_values=_race_label,
-    hooks=("WHICH ONE WINS?",),
-    frame_region=_race_region, validate=_check_race, camera_defaults={"elevation": 68.0},
+    stage_param="incline", stage_def=ParamDef(None, 6, 40), default_stage_values=(22.0,),
+    label="WHICH ROLLS\nFARTHEST?", label_values=_race_label,
+    hooks=("WHICH ROLLS FARTHEST?",),
+    frame_region=_race_region, validate=_check_race, camera_defaults={"elevation": 34.0},
     stage_extras=("ramp_friction", "friction"), events="race", stage_meaning="ramp incline in degrees",
-    material_defaults={"ground_color": [0.85, 0.87, 0.92, 1.0]},
-    variations={"shape_size": (0.34, 0.46), "ramp_friction": (0.3, 0.6), "restitution": (0.05, 0.3)},
+    material_defaults=STUDIO_LOOK,
+    variations={"shape_size": (0.42, 0.55), "damping": (0.28, 0.5), "ramp_friction": (0.4, 0.7)},
+    stage_variations=((18.0,), (26.0,)),
 ))
 
 register(ExperimentTemplate(
     name="sheet_reveal",
-    description="A cloth sheet falls over a hidden object; its silhouette is the clue, then the sheet dissolves to reveal it.",
+    description="Shapes move under a cloth sheet (bumps, pushes, collisions are the clues); then the sheet is pulled away to show what it was.",
     simulation="cloth", objects=("mixed",), default_object="mixed",
     params={
         "cloth_size": ParamDef(8.0, 3.0, 30),
-        "drop_height": ParamDef(1.4, 0.1, 30, description="height of the sheet above the hidden object's top (m)"),
-        "faces": ParamDef(6400, 100, 1_000_000, kind="square", description="cloth mesh resolution"),
-        "reveal_start": ParamDef(4.6, 0.5, 30, description="second at which the sheet starts to dissolve"),
-        "reveal_seconds": ParamDef(1.4, 0.2, 10, description="seconds the dissolve takes"),
+        "drop_height": ParamDef(1.1, 0.1, 30, description="height of the sheet above the hidden shapes' tops (m)"),
+        "faces": ParamDef(8100, 100, 1_000_000, kind="square", description="cloth mesh resolution"),
+        "reveal_start": ParamDef(12.0, 4.0, 40, description="second at which the sheet starts to be pulled away"),
+        "reveal_seconds": ParamDef(1.6, 0.2, 10, description="seconds the reveal takes"),
     },
-    stage_param="hidden", stage_def=ParamDef(None, kind="choice", choices=HIDDEN_OBJECTS), default_stage_values=("snowman",),
-    label="WHAT'S UNDER\nTHE SHEET?", label_values=_hidden_label,
-    hooks=("WHAT'S UNDER THE SHEET?",),
-    frame_region=_hidden_region, validate=_check_sheet, camera_defaults={"elevation": 16.0},
-    material_defaults={"cloth_style": "solid", "cloth_color": [0.93, 0.3, 0.5, 1.0], "cloth_metallic": 0.0, "cloth_roughness": 0.45},
-    events="sheet", stage_meaning="which object is hidden: snowman | pyramid | tower",
-    variations={"drop_height": (1.0, 2.0), "reveal_seconds": (1.0, 2.0)},
-    stage_variations=(("pyramid",), ("tower",)),
+    stage_param="hidden", stage_def=ParamDef(None, kind="choice", choices=HIDDEN_OBJECTS), default_stage_values=("mixed",),
+    label="WHAT'S MOVING\nUNDER THE CLOTH?", label_values=_hidden_label,
+    hooks=("WHAT'S MOVING UNDER THE CLOTH?",),
+    frame_region=_hidden_region, validate=_check_sheet, camera_defaults={"elevation": 36.0},
+    material_defaults={**STUDIO_LOOK, "cloth_style": "solid", "cloth_color": [0.62, 0.05, 0.26, 1.0], "cloth_metallic": 0.0, "cloth_roughness": 0.5},
+    events="sheet", stage_meaning="what moves under the sheet: mixed (3 balls and a cube) | trio (3 balls)",
+    variations={"drop_height": (0.9, 1.5), "reveal_seconds": (1.2, 2.0)},
+    stage_variations=(("trio",),),
 ))
 
 register(ExperimentTemplate(
@@ -582,15 +584,17 @@ register(ExperimentTemplate(
         "n_medium": ParamDef(36, 0, 600, kind="int"),
         "n_small": ParamDef(110, 0, 1500, kind="int"),
         "n_tiny": ParamDef(260, 0, 3000, kind="int"),
-        "pour_gap": ParamDef(2.7, 1.0, 10.0, description="seconds between the starts of consecutive pours"),
+        "pour_gap": ParamDef(3.3, 1.0, 10.0, description="seconds between the starts of consecutive pours"),
+        "full_hold": ParamDef(1.5, 0.0, 6.0, description="extra seconds the jar is left looking full before the second pour"),
         "friction": ParamDef(0.6, 0.0, 2.0),
         "restitution": ParamDef(0.03, 0.0, 0.9),
     },
     stage_param="pours", stage_def=ParamDef(None, 2, 4, kind="int"), default_stage_values=(4,),
-    label="IS IT REALLY\nFULL?", label_values=_jar_label,
-    hooks=("IS THE JAR REALLY FULL?",),
+    label="IS THIS JAR\nREALLY FULL?", label_values=_jar_label,
+    hooks=("IS THIS JAR REALLY FULL?",),
     frame_region=_jar_region, validate=_check_jar, camera_defaults={"elevation": 9.0},
     events="jar", stage_meaning="how many pours (large, medium, small, tiny) are shown",
+    material_defaults=STUDIO_LOOK,
     variations={"pour_gap": (2.3, 3.4), "friction": (0.4, 0.9)},
     stage_variations=((3,), (2,)),
 ))

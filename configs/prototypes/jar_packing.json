@@ -8,7 +8,7 @@
  },
  "simulation": {
   "fps": 30,
-  "duration": 13.5
+  "duration": 19.5
  },
  "stages": [
   {
@@ -39,6 +39,12 @@
   "mode": "none"
  },
  "label": {
-  "size": 0.15
+  "size": 0.15,
+  "color": [
+   1,
+   1,
+   1,
+   1
+  ]
  }
 }

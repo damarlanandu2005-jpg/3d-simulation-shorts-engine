@@ -14,7 +14,7 @@ from . import materials
 _OBJECT_TOP = {"sphere": 2.0, "cube": 2.0, "cylinder": 2.0, "cone": 2.0, "torus": 0.8}
 
 
-def create_ground(scene, color, size: float = 40.0, catcher: bool = False):
+def create_ground(scene, color, size: float = 40.0, catcher: bool = False, look: str = "classic"):
     half = size / 2
     mesh = bpy.data.meshes.new("Ground")
     mesh.from_pydata([(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)], [], [(0, 1, 2, 3)])
@@ -22,7 +22,9 @@ def create_ground(scene, color, size: float = 40.0, catcher: bool = False):
     obj = bpy.data.objects.new("Ground", mesh)
     scene.collection.objects.link(obj)
     obj.modifiers.new("Collision", "COLLISION")
-    materials.assign(obj, materials.principled("GroundMat", color, 0.0, 0.8))
+    materials.assign(obj, materials.principled("GroundMat", color, 0.0, 0.8 if look != "studio" else 0.16))
+    if look == "studio":                          # glossy, visible floor that mirrors the objects (depth)
+        catcher = False
     if catcher:                                  # studio look: the floor shows only shadows over the background (no horizon line)
         obj.is_shadow_catcher = True
     return obj
@@ -192,7 +194,7 @@ def setup_rigid_world(scene, cfg, frames: int, substeps: int = 30, iterations: i
 
 def create_floor_and_wall(scene, cfg, radius: float, wall_height: float, friction: float, restitution: float):
     """Floor plane plus an optional translucent wall (open cylinder) that keeps objects inside the frame."""
-    floor = create_ground(scene, cfg.material.ground_color, catcher=hasattr(cfg, 'experiment'))
+    floor = create_ground(scene, cfg.material.ground_color, catcher=hasattr(cfg, 'experiment'), look=cfg.material.look)
     floor.modifiers.clear()
     make_rigid(floor, "PASSIVE", "BOX", friction, restitution)
     wall = None
@@ -483,40 +485,47 @@ _RACE_COLORS = [(0.92, 0.26, 0.21, 1), (0.98, 0.72, 0.12, 1), (0.25, 0.70, 0.35,
 
 
 def build_roll_off_stage(scene, cfg, stage):
-    from mathutils import Euler, Matrix, Vector
+    """Six shapes share ONE ramp that runs out into a long arena: who rolls farthest?"""
+    from mathutils import Matrix, Vector
 
     from .templates import RACE_SHAPES, race_geometry
     p = {**cfg.params, **stage.params}
     g = race_geometry(p)
     th, run, rise, width = g["theta"], g["run"], g["rise"], g["width"]
-    lane, r, L = p["lane_width"], p["shape_size"], p["ramp_length"]
+    lane, r, L, arena = p["lane_width"], p["shape_size"], p["ramp_length"], p["arena_length"]
     setup_rigid_world(scene, cfg, cfg.frame_count, substeps=60, iterations=80)
-    create_floor_and_wall(scene, cfg, 1.0, 0.0, 0.8, p["restitution"])
-    d = Vector((0.0, math.cos(th), math.sin(th)))          # down-slope reversed: along the slope, upwards
+    create_floor_and_wall(scene, cfg, 1.0, 0.0, p["floor_friction"], p["restitution"])
+    d = Vector((0.0, math.cos(th), math.sin(th)))          # along the slope, upwards
     n = Vector((0.0, -math.sin(th), math.cos(th)))         # slope normal
     centre = Vector((0.0, 0.0, rise / 2))                  # middle of the sloping surface
+    y_low = -run / 2                                       # where the ramp meets the floor
+    pad = 0.15
 
     ramp = _wedge(scene, "Ramp", width + 0.3, run, rise)
     make_rigid(ramp, "PASSIVE", "CONVEX_HULL", p["ramp_friction"], p["restitution"])
-    icy = p["ramp_friction"] * p["friction"] < 0.01          # a frictionless ramp looks like ice
-    materials.assign(ramp, materials.principled("RampMat", (0.45, 0.72, 0.9, 1.0) if icy else (0.20, 0.24, 0.34, 1.0), 0.0,
-                                                0.06 if icy else 0.5))
-    rail_h = 0.2
-    rail_mat = materials.principled("RailMat", (0.88, 0.90, 0.95, 1.0), 0.0, 0.4)
-    for i in range(len(RACE_SHAPES) + 1):                  # 5 dividers + 2 outer rails
-        x = (i - len(RACE_SHAPES) / 2) * lane
-        rail = _box(scene, f"Rail_{i}", (0.05, L, rail_h), tuple(centre + n * (rail_h / 2) + Vector((x, 0, 0))), (th, 0.0, 0.0))
+    materials.assign(ramp, materials.principled("RampMat", (0.20, 0.25, 0.42, 1.0), 0.0, 0.4))
+    rail_mat = materials.principled("RailMat", (0.85, 0.92, 1.0, 1.0), 0.0, 0.2)
+    rail_h = 0.22
+    for sx in (-1, 1):                                     # two low side rails: no dividers, the shapes share the surface
+        x = sx * (width / 2 + 0.12)
+        rail = _box(scene, f"Rail_{sx}", (0.07, L, rail_h), tuple(centre + n * (rail_h / 2) + Vector((x, 0, 0))), (th, 0.0, 0.0))
         make_rigid(rail, "PASSIVE", "BOX", p["ramp_friction"], p["restitution"])
         materials.assign(rail, rail_mat)
-    y_low = -run / 2
-    stop = _box(scene, "Stop", (width + 0.8, 0.3, 0.7), (0.0, y_low - 1.5, 0.35))
+        wall = _box(scene, f"ArenaRail_{sx}", (0.07, arena, 0.32), (x, y_low - arena / 2, 0.16))
+        make_rigid(wall, "PASSIVE", "BOX", 0.3, 0.3)
+        materials.assign(wall, rail_mat)
+    stop = _box(scene, "EndWall", (width + 0.5, 0.3, 0.7), (0.0, y_low - arena - 0.15, 0.35))
     make_rigid(stop, "PASSIVE", "BOX", 0.9, 0.05)
     materials.assign(stop, rail_mat)
+    for k in range(1, int(arena // 2) + 1):               # distance lines across the arena, every two metres
+        mat, strength = _glow_material(f"Mark{k}", (0.25, 0.85, 0.95, 1.0))
+        strength.default_value = 1.4 if k % 5 else 3.0
+        line = _box(scene, f"Mark_{k}", (width, 0.07, 0.008), (0.0, y_low - 2.0 * k, 0.005))
+        materials.assign(line, mat)
 
-    u_finish = -L / 2 + 0.9                                 # finish line, slope coordinate from the middle
     release = max(2, round(p["release_delay"] * cfg.fps))
     u_start = L / 2 - 1.0
-    racers, pads = [], []
+    racers = []
     for i, shape in enumerate(RACE_SHAPES):
         x = (i + 0.5 - len(RACE_SHAPES) / 2) * lane
         obj, coll, mass, clearance = _racer(shape, r)
@@ -529,126 +538,138 @@ def build_roll_off_stage(scene, cfg, stage):
         obj.rotation_euler = (Matrix.Rotation(th, 3, "X") @ local).to_euler()
         obj.location = centre + d * u_start + n * (0.004 + clearance) + Vector((x, 0, 0))
         make_rigid(obj, "ACTIVE", coll, p["friction"], p["restitution"], mass=mass, margin=0.0 if coll == "SPHERE" else 0.001)
-        obj.rigid_body.linear_damping, obj.rigid_body.angular_damping = 0.08, 0.1
+        obj.rigid_body.linear_damping = obj.rigid_body.angular_damping = p["damping"]
         release_at(obj, release)
-        materials.assign(obj, _color_mat(f"Racer{i}", _RACE_COLORS[i], 0.15, 0.28))
+        mat = _color_mat(f"Racer{i}", _RACE_COLORS[i], 0.1, 0.2)
+        mat.node_tree.nodes.get("Principled BSDF").inputs["Coat Weight"].default_value = 0.5
+        materials.assign(obj, mat)
         racers.append(obj)
-        pad_mat, strength = _glow_material(f"Pad{i}", _RACE_COLORS[i])           # this lane's piece of the finish line
-        pad = _box(scene, f"FinishLine_{i}", (lane * 0.9, 0.34, 0.012),
-                   tuple(centre + d * u_finish + n * 0.008 + Vector((x, 0, 0))), (th, 0.0, 0.0))
-        materials.assign(pad, pad_mat)
-        pads.append((pad, strength))
-    return {"racers": racers, "pads": pads, "release": release, "u_finish": u_finish, "centre": tuple(centre),
-            "dir": tuple(d), "shapes": RACE_SHAPES}
+    halo_mat, halo_strength = _glow_material("Halo", (1.0, 0.95, 0.4, 1.0))
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.95, minor_radius=0.06, major_segments=48, minor_segments=10, location=(0, 0, -5))
+    halo = bpy.context.active_object
+    halo.name = "Halo"
+    materials.assign(halo, halo_mat)
+    return {"racers": racers, "halo": (halo, halo_strength), "release": release, "y_low": y_low, "centre": tuple(centre),
+            "dir": tuple(d), "shapes": RACE_SHAPES, "width": width, "arena": arena,
+            "start": (0.0, centre[1] + d[1] * u_start, centre[2] + d[2] * u_start)}
+
+
+def _smooth_series(values, window: int):
+    """Zero-phase moving average (forward and backward exponential pass): a camera that never jerks."""
+    a = 2.0 / (window + 1)
+    out = list(values)
+    for i in range(1, len(out)):
+        out[i] = out[i - 1] + a * (values[i] - out[i - 1])
+    back = list(out)
+    for i in range(len(back) - 2, -1, -1):
+        back[i] = back[i + 1] + a * (out[i] - back[i + 1])
+    return back
+
+
+def _race_camera(cfg, handle, tracks, frames, stop_frame, win_pos, win_frame, finals) -> list:
+    """Camera in FRONT of the pack: line-up, a chase that stays tight on the three leaders, a high wide shot of where every
+    shape came to rest, then an orbit around the winner."""
+    focal = cfg.camera.focal_length
+    W = handle["width"]
+    d_ready = fit_distance(W / 2 * 0.98, focal)
+    n = frames
+    ys = [[t[f][1] for t in tracks] for f in range(n)]
+    xs = [[t[f][0] for t in tracks] for f in range(n)]
+    zs = [[t[f][2] for t in tracks] for f in range(n)]
+    cy, cz, cd = [], [], []
+    for i in range(n):
+        order = sorted(range(len(tracks)), key=lambda k: ys[i][k])[:3]             # the three leaders
+        cy.append(sum(ys[i][k] for k in order) / 3)
+        cz.append(sum(zs[i][k] for k in order) / 3)
+        y_span = max(ys[i][k] for k in order) - min(ys[i][k] for k in order)
+        x_half = max(abs(xs[i][k]) for k in order) + 0.9
+        cd.append(max(7.0, fit_distance(x_half, focal, 1.0), 1.7 * y_span + 6.5))
+    cy, cz, cd = _smooth_series(cy, 16), _smooth_series(cz, 16), _smooth_series(cd, 30)
+    release = handle["release"]
+    sx, sy, sz = handle["start"]
+    y_low = handle["y_low"]
+    far = max(finals)
+    res_start = max(release + 30, min(win_frame - 30, stop_frame - 40))
+    res_t = (0.0, y_low - far * 0.62, 0.3)
+    res_dist = max(15.0, 1.25 * ((far + 3.0) * math.sin(math.radians(56)) + 1.5) / 0.61)
+    keys = []
+    for f in range(1, n + 1):
+        i = f - 1
+        w_chase = smoothstep((f - (release - 6)) / 36.0)
+        w_res = smoothstep((f - res_start) / 44.0)
+        w_win = smoothstep((f - (win_frame + 26)) / 40.0)
+        tgt = [a + (b - a) * w_chase for a, b in zip((0.0, sy, sz * 0.85), (0.0, cy[i], cz[i] + 0.3))]
+        dist = d_ready + (cd[i] - d_ready) * w_chase
+        elev, az = 26 + 12 * w_chase, 10 * w_chase
+        tgt = [a + (b - a) * w_res for a, b in zip(tgt, res_t)]
+        dist = dist + (res_dist - dist) * w_res
+        elev, az = elev + (56 - elev) * w_res, az + (8 - az) * w_res
+        if w_win > 0:
+            t_o = (f - (win_frame + 26)) / max(1, n - (win_frame + 26))
+            tgt = [a + (b - a) * w_win for a, b in zip(tgt, (win_pos[0], win_pos[1], 0.45))]
+            dist = dist + ((7.4 - 2.2 * t_o) - dist) * w_win
+            elev = elev + (30 - elev) * w_win
+            az = az + ((8 + 42 * smoothstep(t_o * 1.1)) - az) * w_win
+        keys.append(orbit_key(f, tgt, dist, elev, az))
+    return keys
+
+
+def smoothstep(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
 
 
 def after_bake_roll_off(scene, cfg, stage, handle) -> dict:
-    """Read the BAKED trajectories: who crossed the line when. Lights the finish pads; announces the winner."""
-    from mathutils import Vector
-
+    """Read the BAKED trajectories: where each shape came to rest. Lights a halo on the winner; plans the camera."""
     from .templates import RACE_NAMES
-    racers, pads = handle["racers"], handle["pads"]
-    centre, d = Vector(handle["centre"]), Vector(handle["dir"])
+    racers = handle["racers"]
     frames = cfg.stage_frames(stage.index)
-    finish = {}
-    prev = {}
+    tracks = [[] for _ in racers]
     for f in range(1, frames + 1):
         scene.frame_set(f)
-        for o in racers:
-            u = (o.location - centre).dot(d)
-            if o.name not in finish and u <= handle["u_finish"]:
-                u0 = prev.get(o.name, u)
-                frac = 0.0 if u0 == u else (u0 - handle["u_finish"]) / (u0 - u)
-                finish[o.name] = round(f - 1 + frac, 2)
-            prev[o.name] = u
-    order = sorted(finish, key=finish.get)
-    if not order:
-        raise RuntimeError("no racer crossed the finish line within the simulated time; lengthen simulation.duration")
-    win_obj = bpy.data.objects[order[0]]
-    winner = win_obj["shape"]
-    win_frame = finish[order[0]]
-    spread = finish[order[-1]] - win_frame
-    tie = len(order) == len(racers) and spread < 2.0           # everyone crossed within two frames: a dead heat, not a winner
-    for o, (pad, strength) in zip(racers, pads):
-        if o.name in finish:
-            f = int(math.ceil(finish[o.name]))
-            strength.default_value = 0.0
-            strength.keyframe_insert("default_value", frame=max(1, f - 1))
-            strength.default_value = 9.0 if (o.name == order[0] or tie) else 3.0
-            strength.keyframe_insert("default_value", frame=f + 2)
+        for t, o in zip(tracks, racers):
+            t.append((o.location.x, o.location.y, o.location.z))
+    y_low = handle["y_low"]
+    final = [y_low - t[-1][1] for t in tracks]                             # metres past the foot of the ramp
+    stops = []
+    for t in tracks:                                                      # frame from which the shape never moves more than ~12 cm/s
+        stop = frames
+        for f in range(frames - 1, 0, -1):
+            if math.dist(t[f], t[f - 1]) > 0.004:
+                break
+            stop = f
+        stops.append(stop + 1)
+    names = [o["shape"] for o in racers]
+    order = sorted(range(len(racers)), key=lambda i: -final[i])
+    win = order[0]
+    margin = final[order[0]] - final[order[1]]
+    all_stop = max(stops)
+    moving = [names[i] for i in range(len(racers)) if stops[i] >= frames]
+    announce = min(frames - 20, all_stop + 8)
+    halo, strength = handle["halo"]
+    halo.location = (tracks[win][-1][0], tracks[win][-1][1], 0.03)
+    halo.keyframe_insert("location", frame=1)
+    strength.default_value = 0.0
+    strength.keyframe_insert("default_value", frame=max(1, announce - 2))
+    strength.default_value = 6.0
+    strength.keyframe_insert("default_value", frame=announce + 6)
+    win_pos = tracks[win][-1]
+    path = _race_camera(cfg, handle, tracks, frames, all_stop, win_pos, announce, final)
     scene.frame_set(1)
-    names = {o.name: o["shape"] for o in racers}
-    announce = int(math.ceil(win_frame)) + 4
-    icy = cfg.stage_params(stage.index)["ramp_friction"] * cfg.stage_params(stage.index)["friction"] < 0.01
-    first = "NOW ON\nICE" if icy else "WHICH ONE\nWINS?"
-    schedule = [[1, first], [announce, "ALL TIE!" if tie else f"{RACE_NAMES[winner]}\nWINS!"]]
-    result = {"winner": None if tie else winner, "dead_heat": tie, "finish_spread_frames": round(spread, 2), "finish_frames": {names[k]: v for k, v in finish.items()}, "order": [names[k] for k in order],
-              "did_not_finish": [names[o.name] for o in racers if o.name not in finish], "release_frame": handle["release"],
-              "incline": cfg.stage_params(stage.index).get("incline", None) or stage.params.get("incline")}
-    set_markers(scene, {"release": handle["release"], "winner_frame": win_frame, "label_schedule": schedule, **result})
+    schedule = [[1, "WHICH ROLLS\nFARTHEST?"], [announce, f"{RACE_NAMES[names[win]]}\nWINS!"]]
+    result = {"winner": names[win], "winner_margin_m": round(margin, 2), "distances_m": {names[i]: round(final[i], 2) for i in order},
+              "order": [names[i] for i in order], "all_stopped_frame": all_stop, "still_moving": moving,
+              "release_frame": handle["release"], "incline": stage.params.get("incline")}
+    set_markers(scene, {"release": handle["release"], "winner_frame": announce, "label_schedule": schedule,
+                        "camera_path": path, **result})
     return result
 
 
-# ---- sheet reveal
-def _static_collider(scene, kind: str, name: str, location, size, color, rotation=(0.0, 0.0, 0.0), roughness=0.45):
-    ops = bpy.ops.mesh
-    if kind == "sphere":
-        ops.primitive_uv_sphere_add(radius=size, segments=64, ring_count=32, location=location)
-    elif kind == "cube":
-        ops.primitive_cube_add(size=size, location=location, rotation=rotation)
-    elif kind == "cylinder":
-        ops.primitive_cylinder_add(radius=size[0], depth=size[1], vertices=64, location=location)
-    elif kind == "cone":
-        ops.primitive_cone_add(radius1=size[0], radius2=0.0, depth=size[1], vertices=48, location=location, rotation=rotation)
-    obj = bpy.context.active_object
-    obj.name = name
-    obj.data.polygons.foreach_set("use_smooth", [kind in ("sphere", "cone", "cylinder")] * len(obj.data.polygons))
-    obj.modifiers.new("Collision", "COLLISION")
-    obj.collision.thickness_outer = 0.01
-    obj.collision.cloth_friction = 5.0
-    materials.assign(obj, _color_mat(name + "Mat", color, 0.0, roughness))
-    return obj
+# ---- sheet reveal: what is moving under the cloth?
+def _dissolve_wipe(mat, a_from: float, a_to: float, start: int, end: int, band: float = 0.35, axis: str = "Z") -> None:
+    """Make the sheet vanish along an axis: everything beyond a moving coordinate becomes transparent.
 
-
-def hidden_layout(scene, hidden: str) -> tuple:
-    """Build the hidden object out of static colliders. Returns (objects, top_z)."""
-    objs = []
-    white, hat_c, nose = (0.97, 0.97, 1.0, 1), (0.08, 0.08, 0.1, 1), (0.98, 0.45, 0.1, 1)
-    if hidden == "snowman":
-        radii = (0.9, 0.62, 0.4)
-        z = radii[0]
-        centres = [z]
-        for a, b in zip(radii, radii[1:]):
-            z += (a + b) * 0.78
-            centres.append(z)
-        for i, (rr, zc) in enumerate(zip(radii, centres)):
-            objs.append(_static_collider(scene, "sphere", f"Collider_{i}", (0, 0, zc), rr, white))
-        head_top = centres[-1] + radii[-1]
-        objs.append(_static_collider(scene, "cylinder", "Collider_hat", (0, 0, head_top - 0.1 + 0.21), (0.3, 0.42), hat_c))
-        objs.append(_static_collider(scene, "cylinder", "Collider_brim", (0, 0, head_top - 0.1 + 0.03), (0.52, 0.06), hat_c))
-        objs.append(_static_collider(scene, "cone", "Collider_nose", (0, -(radii[-1] + 0.2), centres[-1] - 0.02), (0.09, 0.5), nose,
-                                     rotation=(math.pi / 2, 0.0, 0.0)))
-        return objs, head_top - 0.1 + 0.42
-    if hidden == "pyramid":
-        s = 1.25
-        rows = [(i, j) for j in range(3) for i in range(3 - j)]
-        colors = [_RACE_COLORS[(i + j) % 6] for i, j in rows]
-        for k, ((i, j), c) in enumerate(zip(rows, colors)):
-            x = (i - (2 - j) / 2) * s
-            objs.append(_static_collider(scene, "cube", f"Collider_{k}", (x, 0, s / 2 + j * s), s, c))
-        return objs, 3 * s
-    heights = (1.0, 1.0, 1.0, 1.0)
-    z = 0.0
-    for k, (sx, dx) in enumerate(((1.7, 0.0), (1.4, 0.15), (1.1, -0.12), (0.8, 0.1))):
-        objs.append(_static_collider(scene, "cube", f"Collider_{k}", (dx, 0, z + sx / 2), sx, _RACE_COLORS[k]))
-        z += sx
-    return objs, z
-
-
-def _dissolve_from_top(mat, z_from: float, z_to: float, start: int, end: int, band: float = 0.35) -> None:
-    """Make the sheet vanish from the top down: everything above a sinking height becomes transparent.
-
-    A render-time reveal only; the cloth simulation is untouched. ``band`` is the soft edge height in metres.
+    A render-time reveal only; the cloth simulation is untouched. ``band`` is the soft edge width in metres.
     """
     nt = mat.node_tree
     nodes, links = nt.nodes, nt.links
@@ -665,49 +686,147 @@ def _dissolve_from_top(mat, z_from: float, z_to: float, start: int, end: int, ba
     clear = nodes.new("ShaderNodeBsdfTransparent")
     mix = nodes.new("ShaderNodeMixShader")
     links.new(geo.outputs["Position"], sep.inputs["Vector"])
-    links.new(sep.outputs["Z"], sub.inputs[0])
+    links.new(sep.outputs[axis], sub.inputs[0])
     links.new(thr.outputs["Value"], sub.inputs[1])
     links.new(sub.outputs["Value"], mul.inputs[0])
     links.new(mul.outputs["Value"], mix.inputs["Fac"])
     links.new(bsdf.outputs["BSDF"], mix.inputs[1])
     links.new(clear.outputs["BSDF"], mix.inputs[2])
     links.new(mix.outputs["Shader"], out.inputs["Surface"])
-    thr.outputs["Value"].default_value = z_from
+    thr.outputs["Value"].default_value = a_from
     thr.outputs["Value"].keyframe_insert("default_value", frame=max(1, start - 1))
-    thr.outputs["Value"].default_value = z_to
+    thr.outputs["Value"].default_value = a_to
     thr.outputs["Value"].keyframe_insert("default_value", frame=end)
 
 
+# What hides under the sheet: (kind, size, colour, waypoints). A waypoint is (second, x, y); a shape glides between waypoints
+# (smooth start and stop), rolling (spheres) or sliding and turning (cube). The sheet's reaction to them is real cloth physics.
+HIDDEN_LAYOUTS = {
+    "mixed": [("sphere", 0.75, (0.95, 0.22, 0.18, 1), [(0, -1.0, 1.0), (2.4, -1.0, 1.0), (4.6, 0.0, 1.0), (9.8, 0.0, 1.0), (11.4, 0.3, 0.4)]),
+              ("sphere", 0.50, (1.0, 0.80, 0.10, 1), [(0, 1.2, -1.0), (4.4, 1.2, -1.0), (6.4, -0.2, -0.8)]),
+              ("sphere", 0.36, (0.15, 0.80, 0.90, 1), [(0, 1.2, 1.2), (6.2, 1.2, 1.2), (8.4, 1.5, 0.2)]),
+              ("cube", 0.70, (0.60, 0.35, 0.95, 1), [(0, -1.2, -1.2), (8.2, -1.2, -1.2), (10.4, -1.5, 0.1)])],
+    "trio": [("sphere", 0.75, (0.95, 0.22, 0.18, 1), [(0, -1.0, 1.0), (2.4, -1.0, 1.0), (4.6, 0.0, 1.0), (9.8, 0.0, 1.0), (11.4, 0.3, 0.4)]),
+             ("sphere", 0.50, (1.0, 0.80, 0.10, 1), [(0, 1.2, -1.0), (4.4, 1.2, -1.0), (6.4, -0.2, -0.8)]),
+             ("sphere", 0.36, (0.15, 0.80, 0.90, 1), [(0, 1.2, 1.2), (6.2, 1.2, 1.2), (8.4, 1.5, 0.2)])],
+}
+HIDDEN_REVEAL_TEXT = {"mixed": "3 BALLS\nAND A CUBE!", "trio": "THREE\nBALLS!"}
+
+
+def _glide(waypoints, t: float):
+    """Position at second ``t``: smoothstep between waypoints (zero speed at every waypoint)."""
+    prev = waypoints[0]
+    for w in waypoints:
+        if w[0] >= t:
+            if w[0] == prev[0]:
+                return w[1], w[2]
+            u = smoothstep((t - prev[0]) / (w[0] - prev[0]))
+            return prev[1] + (w[1] - prev[1]) * u, prev[2] + (w[2] - prev[2]) * u
+        prev = w
+    return waypoints[-1][1], waypoints[-1][2]
+
+
 def build_sheet_reveal_stage(scene, cfg, stage):
+    from mathutils import Matrix, Vector
     p = {**cfg.params, **stage.params}
     hidden = p["hidden"]
+    layout = HIDDEN_LAYOUTS[hidden]
+    fps, frames = cfg.fps, cfg.frame_count
     scene.gravity = (0.0, 0.0, -cfg.physics.gravity)
-    create_ground(scene, cfg.material.ground_color, catcher=True)
-    objs, top = hidden_layout(scene, hidden)
+    floor = create_ground(scene, cfg.material.ground_color, catcher=True, look=cfg.material.look)
+    start = max(2, round(p["reveal_start"] * fps))
+    # Keyframed (kinematic) shapes: the sheet collides with their motion; they never collide with each other, so the
+    # layout is checked for clearance instead.
+    shapes, tracks = [], []
+    for i, (kind, size, color, wps) in enumerate(layout):
+        if kind == "sphere":
+            bpy.ops.mesh.primitive_uv_sphere_add(radius=size, segments=48, ring_count=24)
+            r = size
+        else:
+            bpy.ops.mesh.primitive_cube_add(size=size)
+            r = size * 0.5 * math.sqrt(2)                              # circumradius for the clearance check
+        obj = bpy.context.active_object
+        obj.name = f"Ball_{i:03d}"
+        if kind == "sphere":
+            _smooth(obj)
+        materials.assign(obj, _color_mat(f"Hidden{i}", color, 0.0, 0.22))
+        rot, travelled, prev = Matrix.Identity(3), 0.0, None
+        track = []
+        for f in range(1, frames + 1):
+            x, y = _glide(wps, (f - 1) / fps)
+            if prev is not None:
+                dx, dy = x - prev[0], y - prev[1]
+                d = math.hypot(dx, dy)
+                travelled += d
+                if d > 1e-9:
+                    if kind == "sphere":                                # roll without slipping
+                        rot = Matrix.Rotation(d / size, 3, Vector((-dy, dx, 0.0)).normalized()) @ rot
+                    else:                                               # slide and turn
+                        rot = Matrix.Rotation(0.9 * d, 3, "Z") @ rot
+            prev = (x, y)
+            obj.location = (x, y, size if kind == "sphere" else size / 2)
+            obj.rotation_euler = rot.to_euler()
+            obj.keyframe_insert("location", frame=f)
+            obj.keyframe_insert("rotation_euler", frame=f)
+            track.append((x, y))
+        tracks.append((track, r))
+        shapes.append(obj)
+    worst = min(math.dist(a[0][f], b[0][f]) - a[1] - b[1] for ia, a in enumerate(tracks) for b in tracks[ia + 1:] for f in range(frames))
+    if worst < 0.02:
+        raise RuntimeError(f"hidden shapes would overlap while moving (clearance {worst:.2f} m): fix the waypoints")
+    for o in shapes:                                                    # the sheet collides with the shapes' motion
+        o.modifiers.new("Collision", "COLLISION")
+        o.collision.thickness_outer = 0.01
+        o.collision.cloth_friction = 1.0
+    floor.modifiers.new("Collision", "COLLISION")
+    top = max(2 * l[1] if l[0] == "sphere" else l[1] for l in layout)
     segments = faces_segments(p["faces"])
     cloth = create_cloth_mesh(scene, segments, p["cloth_size"], top + p["drop_height"])
-    add_cloth_physics(cloth, cfg.physics, cfg.frame_count)
+    from dataclasses import replace as _replace
+    add_cloth_physics(cloth, _replace(cfg.physics, quality=max(cfg.physics.quality, 10), collision_distance=0.02), frames)   # moving colliders need finer steps
     mat = materials.principled("ClothMat", cfg.material.cloth_color, cfg.material.cloth_metallic, cfg.material.cloth_roughness)
     add_cloth_look(cloth, cfg.material.cloth_style, segments, p["cloth_size"], mat)
-    # The hidden object is never drawn while the sheet is falling: the viewer only sees what the CLOTH does over it.
-    # (Collision is unaffected by render visibility.) At the reveal the sheet turns transparent.
-    start = max(2, round(p["reveal_start"] * cfg.fps))
-    end = start + max(2, round(p["reveal_seconds"] * cfg.fps))
-    for o in objs:
+    # Nothing shows through the falling sheet: the shapes are drawn once it has landed, and the sheet hides them until the reveal.
+    cover = round(2.0 * fps)
+    for o in shapes:
         o.hide_render = True
         o.keyframe_insert("hide_render", frame=1)
         o.hide_render = False
-        o.keyframe_insert("hide_render", frame=start - 1)
-    _dissolve_from_top(mat, top + 0.7, -0.4, start, end)
-    names = {"snowman": "A SNOWMAN!", "pyramid": "A PYRAMID!", "tower": "A TOWER!"}
-    first = "WHAT'S UNDER\nTHE SHEET?"
-    set_markers(scene, {"reveal_start": start, "reveal_end": end, "hidden": hidden, "top": top,
-                        "label_schedule": [[1, first], [start + 4, names[hidden].replace(" ", "\n", 1)]]})
+        o.keyframe_insert("hide_render", frame=cover)
+    end = start + max(2, round(p["reveal_seconds"] * fps))
+    _dissolve_wipe(mat, p["cloth_size"] / 2 + 0.6, -p["cloth_size"] / 2 - 0.6, start, end, band=1.0, axis="X")
+    markers = {"reveal_start": start, "reveal_end": end, "hidden": hidden, "clearance_m": round(worst, 2),
+               "label_schedule": [[1, "WHAT'S MOVING\nUNDER THE CLOTH?"], [start + 6, HIDDEN_REVEAL_TEXT[hidden]]]}
+    wide = fit_distance(2.5, cfg.camera.focal_length)
+    keyed = {1: (1.3, 42, 0), round(2.4 * fps): (1.0, 38, 6), round(7 * fps): (0.82, 40, 14),
+             start - round(1.2 * fps): (0.76, 36, 18), start + round(1.0 * fps): (0.86, 32, 12), frames: (0.84, 26, 6)}
+    marks = sorted(keyed)
+    path = []
+    for f in range(1, frames + 1):
+        i = max(m for m in marks if m <= f)
+        j = min((m for m in marks if m >= f), default=marks[-1])
+        t = 0.0 if i == j else smoothstep((f - i) / (j - i))
+        d, e, az = [keyed[i][q] + (keyed[j][q] - keyed[i][q]) * t for q in range(3)]
+        path.append(orbit_key(f, (0.0, 0.0, 0.5), wide * d, e, az))
+    markers["camera_path"] = path
+    set_markers(scene, markers)
     return cloth
 
 
 # ---- jar packing
-_POUR_COLORS = [(0.20, 0.23, 0.34, 1), (0.88, 0.40, 0.22, 1), (0.98, 0.76, 0.20, 1), (0.22, 0.80, 0.78, 1)]
+_POUR_COLORS = [(0.10, 0.32, 0.95, 1), (1.0, 0.38, 0.08, 1), (1.0, 0.84, 0.10, 1), (0.85, 1.0, 1.0, 1)]
+
+
+def orbit_key(frame, target, dist, elev_deg, az_deg=0.0):
+    """One camera-path key: camera on a sphere around ``target`` (az 0 = camera in front at -y, 180 = behind)."""
+    e, a = math.radians(elev_deg), math.radians(az_deg)
+    cam = [target[0] + dist * math.cos(e) * math.sin(a), target[1] - dist * math.cos(e) * math.cos(a), target[2] + dist * math.sin(e)]
+    return [int(frame), [round(c, 4) for c in cam], [round(t, 4) for t in target]]
+
+
+def fit_distance(half_width: float, focal: float = 50.0, margin: float = 1.12) -> float:
+    """Camera distance at which ``half_width`` metres fill the 9:16 frame's width."""
+    return margin * half_width / ((18.0 / focal) * (9 / 16))
 
 
 def build_jar_stage(scene, cfg, stage):
@@ -718,23 +837,35 @@ def build_jar_stage(scene, cfg, stage):
     setup_rigid_world(scene, cfg, cfg.frame_count, substeps=60, iterations=80)
     floor, wall = create_floor_and_wall(scene, cfg, R, H, p["friction"], p["restitution"])
     wall.data.materials.clear()
-    wall.data.materials.append(translucent("JarMat", [0.78, 0.9, 0.95, 1.0], 0.14))
-    bpy.ops.mesh.primitive_torus_add(major_radius=R + 0.06, minor_radius=0.035, major_segments=64, minor_segments=12,
-                                     location=(0, 0, H))
-    rim = bpy.context.active_object
-    rim.name = "Rim"
-    materials.assign(rim, materials.principled("RimMat", (0.85, 0.92, 0.97, 1.0), 0.0, 0.1))
+    wall.data.materials.append(translucent("JarMat", [0.80, 0.92, 1.0, 1.0], 0.16))
+    bpy.ops.mesh.primitive_cylinder_add(radius=R, depth=2.2, vertices=64, end_fill_type="NOTHING", location=(0, 0, H + 1.1))
+    guard = bpy.context.active_object                 # invisible collar above the rim: a stone that bounces up cannot leave the jar
+    guard.name = "Guard"
+    sol = guard.modifiers.new("Thick", "SOLIDIFY")
+    sol.thickness, sol.offset = 0.12, 1.0
+    _activate(guard)
+    bpy.ops.object.modifier_apply(modifier="Thick")
+    make_rigid(guard, "PASSIVE", "MESH", p["friction"], p["restitution"])
+    guard.hide_render = True
+    rim_mat = materials.principled("RimMat", (0.9, 0.96, 1.0, 1.0), 0.0, 0.08)
+    for name, z in (("Rim", H), ("Base", 0.02)):
+        bpy.ops.mesh.primitive_torus_add(major_radius=R + 0.06, minor_radius=0.04, major_segments=64, minor_segments=12, location=(0, 0, z))
+        ring = bpy.context.active_object
+        ring.name = name
+        materials.assign(ring, rim_mat)
     far = R * 14                       # later pours wait far to the side and are moved into place just before they are released
-    actives, schedule, starts = [], [], []
+    actives, starts, ends = [], [], []
     ball_index = 0
     for k, (rad, count) in enumerate(pours):
         if count <= 0:
             starts.append(None)
             continue
-        start = round((0.9 + k * p["pour_gap"]) * cfg.fps)
+        start = round((0.9 + k * p["pour_gap"] + (p["full_hold"] if k > 0 else 0.0)) * cfg.fps)
         starts.append(start)
         batch = max(2, count // 12)
-        mat = materials.principled(f"Pour{k}", _POUR_COLORS[k], 0.0, 0.32)
+        ends.append(start + ((count - 1) // batch) * 3)
+        mat = materials.principled(f"Pour{k}", _POUR_COLORS[k], 0.0, 0.16)
+        mat.node_tree.nodes.get("Principled BSDF").inputs["Coat Weight"].default_value = 0.6
         proto = None
         z0 = H + 1.5 + rad
         for i, (x, y, z) in enumerate(spawn_positions(count, rad, R * 0.7, z0, cfg.seed + k)):
@@ -763,8 +894,31 @@ def build_jar_stage(scene, cfg, stage):
             release_at(obj, release)
             actives.append(obj)
             ball_index += 1
-    set_markers(scene, {"pour_starts": starts, "jar_height": H, "jar_radius": R, "pours": len(pours)})
+    set_markers(scene, {"pour_starts": starts, "pour_ends": ends, "jar_height": H, "jar_radius": R, "pours": len(pours),
+                        "added": sum(c for _, c in pours[1:])})
     return actives
+
+
+def _jar_camera(cfg, markers, frames) -> list:
+    """Wide on the first pour, a push into the 'looks full' gaps, close and high for the small pours, then a low close-up
+    of the packed jar. Keys are in frames."""
+    R, H = markers["jar_radius"], markers["jar_height"]
+    wide = fit_distance(R + 0.35, cfg.camera.focal_length)
+    starts = [s for s in markers["pour_starts"] if s is not None]
+    ends = markers["pour_ends"]
+    full = (ends[0] + int(cfg.fps * 1.4)) if len(ends) else frames // 4      # the large rocks have settled: it looks full
+    last = (ends[-1] + int(cfg.fps * 2.2)) if ends else frames - 90           # the last pour has settled
+    last = min(last, frames - int(cfg.fps * 2.6))
+    s1 = starts[1] if len(starts) > 1 else full + 30
+    zt = H * 0.5
+    keys = [orbit_key(1, (0, 0, zt), wide, 9, 0),
+            orbit_key(ends[0] if ends else 40, (0, 0, zt), wide * 0.97, 9, 4),
+            orbit_key(full, (0, 0, H * 0.72), wide * 0.74, 24, 10),            # push in, look down into the gaps
+            orbit_key(s1 + int(cfg.fps * 0.5), (0, 0, H * 0.72), wide * 0.7, 26, 14),
+            orbit_key(last, (0, 0, H * 0.55), wide * 0.76, 15, 22),
+            orbit_key(frames - int(cfg.fps * 1.5), (0, 0, H * 0.5), wide * 0.72, 7, 28),   # the whole packed jar, label on
+            orbit_key(frames, (0, 0, H * 0.42), wide * 0.36, 4, 36)]           # then straight into the packing through the glass
+    return sorted({k[0]: k for k in keys}.values(), key=lambda k: k[0])
 
 
 def after_bake_jar(scene, cfg, stage, handle) -> dict:
@@ -787,14 +941,17 @@ def after_bake_jar(scene, cfg, stage, handle) -> dict:
     over = sum(1 for o in handle if o.location.z - o["radius"] > markers["jar_height"] * 1.0)
     outside = sum(1 for o in handle if math.hypot(o.location.x, o.location.y) > markers["jar_radius"] + 0.05)
     scene.frame_set(1)
-    final_settle = min(frames, int(frames * 0.0) + frames)
-    schedule = [[1, "IS IT REALLY\nFULL?"]]
+    path = _jar_camera(cfg, markers, frames)
+    final_at = max(1, frames - round(cfg.fps * 3.2))
+    schedule = [[1, "IS THIS JAR\nREALLY FULL?"]]
     if len(starts) > 1:
         schedule.append([starts[1] - 2, ""])
-    schedule.append([max(1, frames - round(cfg.fps * 2.0)), "NOW IT'S\nFULL"])
+        schedule.append([final_at, f"{markers['added']} MORE\nFIT INSIDE"])
+        schedule.append([frames - round(cfg.fps * 1.5), ""])               # the last close-up is left to the picture
     result = {"fill_levels": levels, "jar_height": markers["jar_height"], "above_rim": over, "outside_jar": outside}
     markers.update(result)
     markers["label_schedule"] = schedule
+    markers["camera_path"] = path
     set_markers(scene, markers)
     return result
 

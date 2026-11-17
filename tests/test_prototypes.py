@@ -20,8 +20,8 @@ def test_prototype_configs_load():
 
 
 def test_templates_registered_with_story_question_hooks():
-    for name, hook in (("roll_off", "WHICH ONE WINS?"), ("sheet_reveal", "WHAT'S UNDER THE SHEET?"),
-                       ("jar_packing", "IS THE JAR REALLY FULL?")):
+    for name, hook in (("roll_off", "WHICH ROLLS FARTHEST?"), ("sheet_reveal", "WHAT'S MOVING UNDER THE CLOTH?"),
+                       ("jar_packing", "IS THIS JAR REALLY FULL?")):
         assert get_template(name).hooks == (hook,)
     assert len(RACE_SHAPES) == 6 and len(set(RACE_SHAPES)) == 6
 
@@ -29,7 +29,7 @@ def test_templates_registered_with_story_question_hooks():
 def test_race_region_is_deeper_than_wide_and_camera_fits_it():
     t = get_template("roll_off")
     region = t.frame_region(t.resolve_params({}), 17.0)
-    assert region.half_depth > region.half_width            # the ramp runs away from the camera
+    assert region.half_depth > 2 * region.half_width        # ramp plus arena: a long, narrow track
     square = fit_camera(region.half_width, region.top, 0.0, "wide", 50.0, elevation=68.0)
     deep = fit_camera(region.half_width, region.top, 0.0, "wide", 50.0, elevation=68.0, half_depth=region.half_depth)
     assert deep["distance"] > square["distance"]            # a deeper region needs the camera further away
@@ -44,11 +44,11 @@ def test_race_geometry():
     ("roll_off", {"lane_width": 0.6}, "lane_width"),
     ("jar_packing", {"n_tiny": 3000, "n_small": 1500, "n_medium": 600}, "jar holds only"),
     ("jar_packing", {"big_radius": 0.9}, "too large"),
-    ("sheet_reveal", {"cloth_size": 3.0}, "too small"),
+    ("sheet_reveal", {"cloth_size": 4.0}, "too small"),
 ])
 def test_broken_scenes_are_rejected(exp, params, msg):
     t = get_template(exp)
-    stage = {"roll_off": 17.0, "sheet_reveal": "snowman", "jar_packing": 4}[exp]
+    stage = {"roll_off": 17.0, "sheet_reveal": "mixed", "jar_packing": 4}[exp]
     with pytest.raises(ConfigError, match=msg):
         t.validate(t.resolve_params(params), [stage], "x")
 
@@ -73,9 +73,25 @@ def test_clue_window_only_for_experiments_with_a_reveal():
         from_dict(data)
 
 
-def test_frictionless_second_heat_is_allowed_per_stage():
+def test_roll_off_is_one_shared_race_not_lanes_or_heats():
     cfg = load_config(ROOT / "configs" / "prototypes" / "roll_off.json")
-    assert cfg.stage_params(1)["ramp_friction"] == 0.0 and cfg.stage_params(0)["ramp_friction"] > 0
+    assert cfg.stage_count == 1 and cfg.template.stage_extras == ("ramp_friction", "friction")
+    assert cfg.params["arena_length"] >= 10 and cfg.material.look == "studio"
+
+
+def test_studio_look_is_validated():
+    data = json.loads((ROOT / "configs" / "prototypes" / "jar_packing.json").read_text())
+    data["material"] = {"look": "neon"}
+    with pytest.raises(ConfigError, match="look"):
+        from shorts_engine.config import from_dict
+        from_dict(data)
+
+
+def test_prototype_durations_follow_the_story():
+    jar = load_config(ROOT / "configs" / "prototypes" / "jar_packing.json")
+    assert 18.0 <= jar.frame_count / jar.fps <= 22.0                # the packing story needs its time
+    sheet = load_config(ROOT / "configs" / "prototypes" / "sheet_reveal.json")
+    assert sheet.params["reveal_start"] * sheet.fps + 30 < sheet.frame_count     # the reveal and its label fit inside the clip
 
 
 def test_new_templates_are_in_the_registry_only_once():

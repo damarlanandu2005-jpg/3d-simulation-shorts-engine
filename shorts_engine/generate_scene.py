@@ -128,8 +128,8 @@ def build_stage(cfg, stage) -> None:
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     configure_scene(scene, cfg)
-    materials.setup_world(scene, cfg.material.background_color)
-    materials.add_lights(scene)
+    materials.setup_world(scene, cfg.material.background_color, cfg.material.look)
+    materials.add_lights(scene, cfg.material.look)
 
     cam = camera.add_camera(scene, cfg.camera_for_stage(stage.index), cfg.output.width, cfg.output.height)
     label_mat = materials.emission("LabelMat", cfg.label.color, 1.0)
@@ -177,7 +177,7 @@ def render_stage(cfg, stage, frame_start, frame_end) -> None:
         raise SystemExit(f"frame range {frame_start}-{frame_end} outside 1-{cfg.frame_count}")
 
     motion = getattr(cfg, "camera_motion", "static")
-    before = camera_motion_callback(cfg, stage) if motion != "static" else None
+    before = camera_motion_callback(cfg, stage) if (motion != "static" or scene.get("sim_markers")) else None
     before = with_label_schedule(scene, cfg, before)
     render_frames(scene, range(frame_start, frame_end + 1), lambda f: stage.frames_dir / f"frame_{f:04d}.png",
                   stage.index, stage.faces, device, denoiser, before_frame=before)
@@ -222,9 +222,38 @@ def strongest_event_frame(cfg, stage):
     return int(round(max(found, key=lambda e: e.strength).frame)) if found else None
 
 
+def camera_path_callback(scene):
+    """A camera path written by the experiment builder (sim_markers["camera_path"]): [[frame, cam xyz, target xyz], ...].
+
+    Linear between keys; builders put dense keys where the camera follows the action and few keys where it glides.
+    """
+    raw = scene.get("sim_markers")
+    path = json.loads(raw).get("camera_path") if raw else None
+    if not path:
+        return None
+    keys = sorted(path, key=lambda k: k[0])
+    cam, target = bpy.data.objects["Camera"], bpy.data.objects["CameraTarget"]
+
+    def move(frame):
+        if frame <= keys[0][0]:
+            a = b = keys[0]
+        elif frame >= keys[-1][0]:
+            a = b = keys[-1]
+        else:
+            b = next(k for k in keys if k[0] >= frame)
+            a = keys[keys.index(b) - 1]
+        t = 0.0 if a is b or b[0] == a[0] else (frame - a[0]) / (b[0] - a[0])
+        cam.location = [a[1][i] + (b[1][i] - a[1][i]) * t for i in range(3)]
+        target.location = [a[2][i] + (b[2][i] - a[2][i]) * t for i in range(3)]
+    return move
+
+
 def camera_motion_callback(cfg, stage):
     """Per-frame camera move (push-in / follow / impact punch-in) from the experiment's camera.motion."""
     from shorts_engine import camera_rig
+    path = camera_path_callback(bpy.context.scene)
+    if path:
+        return path
     base = cfg.camera_for_stage(stage.index)
     event_frame = strongest_event_frame(cfg, stage) if cfg.camera_motion == "impact" else None
     objs = tracked_objects()

@@ -8,18 +8,18 @@
  },
  "simulation": {
   "fps": 30,
-  "duration": 8.0
+  "duration": 15.5
  },
  "stages": [
   {
    "params": {
-    "hidden": "snowman"
+    "hidden": "mixed"
    }
   }
  ],
  "camera": {
   "preset": "wide",
-  "motion": "push_in"
+  "motion": "static"
  },
  "render": {
   "samples": 32,
@@ -42,6 +42,12 @@
   "window": "clue"
  },
  "label": {
-  "size": 0.15
+  "size": 0.115,
+  "color": [
+   1,
+   1,
+   1,
+   1
+  ]
  }
 }

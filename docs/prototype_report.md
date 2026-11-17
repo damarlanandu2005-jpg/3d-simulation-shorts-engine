@@ -18,3 +18,20 @@ Cloth: moving bulges under the pink cloth are a real mystery; reveal "3 BALLS AN
 camera glitch; the reveal is abrupt; revealed objects are small; the jagged "tentacle" edges look like cloth artefacts.
 Roll-off: studio look is good and the winner close-up is attractive. Weak: cone, cube and prism stall near the top for most of the run so the
 middle is nearly static; only sphere, can and ring really race; title text overlaps the bright ramp.
+
+# Jar Packing, final video (round 3)
+
+- Final video: GitHub Actions run 44119753841, artifact `kaggle-baseline-44119753841`, `result/proto_jar_packing/proto_jar_packing.mp4`
+  (Kaggle Tesla T4, commit a2ade78). Not committed to git. Metadata and YouTube text: `docs/youtube/jar_packing_001.json`.
+- 19.5 s, 720x1280, 30 fps, h264 + aac (audio duration equals video duration), QC passed.
+- What changed: the jar is tapped after every pour (kinematic jar bottom/wall hops, real rigid-body settling), so stones sink into
+  gaps instead of piling on the rim (stones above the rim: 0; fill level falls 2.16 -> 1.8 m as the pile compacts); an invisible
+  guard collar above the rim; tiny stones are teal; steadier final shot; first rock released at 0.5 s (`lead_in`).
+- Inspected frames of the real MP4 (18 across the video, plus the first 2.4 s and the last 4 s). Audio was not listened to; only
+  the audio stream and QC were checked.
+- Scores: hook 7, visual 8, physics 8, creativity 7, progression 8, payoff 7, audio 7 (unchecked by ear), replayability 7; overall 7.4.
+  That is below the 8 target.
+- Known limitations: in the last shot the medium orange stones hide most of the large blue rocks behind the glass; teal/yellow
+  stones form a layer on the top of the orange mound (inside the jar, not above the rim) as well as filling gaps lower down;
+  the first ~0.8 s is mostly an empty jar before the first rock enters the frame.
+- Tests: 478 passed / 35 skipped without bpy; with real Blender (bpy) 512 passed, 1 skipped.

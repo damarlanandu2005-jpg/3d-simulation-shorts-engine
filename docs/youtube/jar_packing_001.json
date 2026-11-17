@@ -1,0 +1,17 @@
+{
+  "filename": "simmorph_jar_packing_001_is_this_jar_really_full.mp4",
+  "source_artifact": "GitHub Actions run 44119753841, artifact kaggle-baseline-44119753841, result/proto_jar_packing/proto_jar_packing.mp4",
+  "kaggle_kernel": "se-v11-custom-a2ade78-44114353843 (Tesla T4)",
+  "commit": "a2ade78",
+  "config": "configs/prototypes/jar_packing.json",
+  "resolution": "720x1280",
+  "fps": 30,
+  "duration_seconds": 19.5,
+  "codecs": {"video": "h264", "audio": "aac"},
+  "title": "Is This Jar Really Full?",
+  "title_alternatives": ["This Jar Looks Full... Until the Small Ones Fall In", "406 More Balls Fit in a \"Full\" Jar (Real Physics)"],
+  "description": "Is this jar really full? Large rocks fill it to the brim... then medium, small and tiny balls keep finding gaps. 406 more balls fit inside, all by real rigid-body physics (no tricks, nothing placed by hand).\n\nSimulated in Blender.\n\n#Shorts #Physics #Satisfying #Simulation #Blender",
+  "hashtags": ["#Shorts", "#Physics", "#Satisfying", "#Simulation", "#Blender", "#IsItFull"],
+  "thumbnail_recommendation": "frame at about 4.5 s: the large blue rocks fill the jar to the rim with the question title on top (the jar looks full)",
+  "scores": {"hook": 7, "visual": 8, "physics": 8, "creativity": 7, "progression": 8, "payoff": 7, "audio": 7, "replayability": 7, "overall": 7.4}
+}

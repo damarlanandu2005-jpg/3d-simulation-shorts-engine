@@ -1,20 +1,20 @@
-# Creative prototype report (roll_off, sheet_reveal, jar_packing)
+# Prototype report, round 2 (redesigned)
 
-Kaggle run 43859343410 (commit 42debee, 720p, GPU): all three rendered, QC passed, 720x1280 h264 + aac.
-Durations: roll_off 14.0 s, sheet_reveal 10.0 s, jar_packing 13.5 s.
+Kaggle run 44079728141 (commit 9d1bd82+, 720p GPU). All three rendered and passed QC (720x1280 h264+aac).
+Durations: jar_packing 19.5 s, roll_off 16.5 s, sheet_reveal 17.5 s.
 
-**Review limitation:** the 720p mp4s sit in a GitHub artifact whose storage host is blocked for the sandbox shell, and
-folder access for a browser download was denied. The visual review below is therefore of real rendered frames of the same
-scenes at 360x640 / low samples (local Blender), plus QC/ffprobe/audio-timeline data from the real 720p run. It is not a
-review of the final 720p files.
+Visual review is of 18 evenly spaced frames per final MP4 (contact sheets printed by the workflow's review mode,
+run 44093358669). Audio was checked from the audio timeline and QC only; it was not listened to.
 
-| | Q | first 3 s | action | progression | payoff | different | muted | final | score |
+| | hook | curiosity | visual | physics | originality | escalation | payoff | replay | total /10 |
 |---|---|---|---|---|---|---|---|---|---|
-| Roll-off | 2 | 1 | 2 | 1 | 1 | 1 | 1 | 1 | 7.5 |
-| Sheet | 2 | 1 | 1 | 1 | 2 | 2 | 1 | 2 | 7 |
-| Jar | 2 | 2 | 2 | 2 | 1 | 2 | 1 | 1 | 7.5 |
-(approximate; each criterion 0-1.25 weighted by judgement)
+| Jar packing | 7 | 8 | 8 | 8 | 7 | 8 | 7 | 7 | 7.5 |
+| Hidden movement cloth | 8 | 8 | 7 | 6 | 8 | 7 | 6 | 6 | 6.5 |
+| Roll-off | 5 | 4 | 7 | 5 | 5 | 4 | 6 | 4 | 5 |
 
-Physics: roll_off heat 1 (14 deg) sphere wins, can 3.5 frames behind, cube/prism last, nothing fails to finish; heat 2 on
-a frictionless ramp is an exact dead heat ("ALL TIE!"). Sheet: sheet drapes, silhouette reads as a ghost, dissolves top-down
-to a snowman. Jar: no stone outside the jar, level stays at the rim while medium/small/tiny stones fill the gaps.
+Jar: clear jar, large blue rocks look full, orange, yellow and tiny white stones sink into the gaps, "406 MORE FIT INSIDE",
+final close-up. Weak: the last close-up is a soft macro of a few rocks and shows little packing; tiny stones sit on top and clutter the rim.
+Cloth: moving bulges under the pink cloth are a real mystery; reveal "3 BALLS AND A CUBE!". Weak: one frame early on is a flat pink
+camera glitch; the reveal is abrupt; revealed objects are small; the jagged "tentacle" edges look like cloth artefacts.
+Roll-off: studio look is good and the winner close-up is attractive. Weak: cone, cube and prism stall near the top for most of the run so the
+middle is nearly static; only sphere, can and ring really race; title text overlaps the bright ramp.

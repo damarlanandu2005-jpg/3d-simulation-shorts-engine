@@ -4,7 +4,9 @@
  "seed": 3,
  "experiment": {
   "type": "jar_packing",
-  "params": {}
+  "params": {
+   "lead_in": 0.5
+  }
  },
  "simulation": {
   "fps": 30,

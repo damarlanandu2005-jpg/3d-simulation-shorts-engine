@@ -868,7 +868,7 @@ def build_jar_stage(scene, cfg, stage):
         if count <= 0:
             starts.append(None)
             continue
-        start = round((0.9 + k * p["pour_gap"] + (p["full_hold"] if k > 0 else 0.0)) * cfg.fps)
+        start = round((p["lead_in"] + k * p["pour_gap"] + (p["full_hold"] if k > 0 else 0.0)) * cfg.fps)
         starts.append(start)
         batch = max(2, count // 12)
         ends.append(start + ((count - 1) // batch) * 3)

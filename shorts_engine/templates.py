@@ -588,6 +588,7 @@ register(ExperimentTemplate(
         "full_hold": ParamDef(1.5, 0.0, 6.0, description="extra seconds the jar is left looking full before the second pour"),
         "friction": ParamDef(0.6, 0.0, 2.0),
         "restitution": ParamDef(0.03, 0.0, 0.9),
+        "lead_in": ParamDef(0.9, 0.1, 5.0, description="seconds before the first rock is released"),
         "tap": ParamDef(0.05, 0.0, 0.2, description="height of the little hops the jar makes when it is tapped after a pour (m); 0 = no tapping"),
         "tap_seconds": ParamDef(1.2, 0.2, 4.0, description="how long the jar is tapped after each pour (s)"),
     },

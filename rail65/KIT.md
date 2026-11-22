@@ -29,3 +29,6 @@
 
 ## Editing
 `build_scripts/` rebuilds the .blend: `python build_rail.py out.blend` (bpy 5.x). `build_rail.py` has the shot list (`shots()`), captions (`WORDS`), cast (`build_all`). After changes, recompute `fs_off` (printed on save) into `run_config.json`, and `git add -f rail65/kit/rail65.blend`.
+
+## Update: look pass (first 15 s)
+Canyon walls are stacked rock blocks (`rail_rocks.py`), characters have stubby proportions and mesh outlines (inverted hull) instead of Freestyle (Freestyle was the main render cost). `run_config.json` is set to frames 1-451 (first 15 s) for the test run; set `frame_end` back to 1956 for the full video.

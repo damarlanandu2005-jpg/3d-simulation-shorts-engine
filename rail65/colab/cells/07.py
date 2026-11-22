@@ -3,8 +3,8 @@ import sys
 sys.path.insert(0, "/content/eevee_test/lib")
 from ee_common import *
 SAMPLES = CFG.get("samples", 0)          # 0 = use the .blend's own setting (64). Lower (e.g. 32) if the projection exceeds your time budget.
-FS_OFF = CFG.get("fs_off", "120-235,262-318,620-822,1089-1335,1790-1956")   # frames where the character is off-screen: outlines (Freestyle) skipped; verified pixel-identical locally
-BENCH_FRAMES = "32,91,248,336,437,553,692,809,979,1147,1390,1589,1763,1946"
+FS_OFF = CFG.get("fs_off", "")   # frames where the character is off-screen: outlines (Freestyle) skipped; verified pixel-identical locally
+BENCH_FRAMES = "32,91,177,248,290,336,382,437"
 banner(5, "benchmark")
 REPORTS.mkdir(parents=True, exist_ok=True); bdir = BENCH_DIR / "frames"; shutil.rmtree(bdir, ignore_errors=True); bdir.mkdir(parents=True)
 smi_csv = LOGS / "smi_bench.csv"; p, f = start_smi(smi_csv)

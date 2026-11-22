@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, "/content/eevee_test/lib")
 from ee_common import *
 SAMPLES = CFG.get("samples", 0)            # 0 = file default (64); must match what you benchmarked
-FS_OFF = CFG.get("fs_off", "120-235,262-318,620-822,1089-1335,1790-1956")   # see benchmark cell
+FS_OFF = CFG.get("fs_off", "")   # see benchmark cell
 F0, F1 = CFG.get("frame_start", 1), CFG.get("frame_end", 1956)
 CHUNK = 100            # frames per Blender session (a crash loses at most one chunk)
 banner(6, "full render")

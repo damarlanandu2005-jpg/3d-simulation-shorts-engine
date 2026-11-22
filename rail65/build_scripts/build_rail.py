@@ -24,8 +24,8 @@ def shots():
     S.append((2.13, 3.93, [(2.13, (T + 0.1, -0.4, 0.55), (T + 0.7, 6, 1.35)), (3.9, (T + 0.3, 0.2, 0.60), (T + 0.7, 6, 1.35))], 64, 3.0))
     S.append((3.93, 7.83, [(3.93, (B_ - 3, -25, 26), (B_ + 2, 45, 0)), (5.9, (B_ - 2, 12, 15), (B_ + 4, 70, -12)), (7.8, (B_ + 6, 38, 5.5), (B_ + 9, 46, 0.6))], 64, 3.0))
     S.append((7.83, 8.67, [(7.83, (B_ + 9.3, 54, 4.2), (B_ + 9, 46, -8)), (8.64, (B_ + 9.3, 52, 3.4), (B_ + 9, 45, -10))], 64, 3.0))
-    S.append((8.67, 10.6, [(8.67, (D_, -5, 1.2), (D_, 60, 2.2)), (10.57, (D_, 80, 2.6), (D_, 190, 4))], 64, 3.0))
-    S.append((10.6, 11.77, [(10.6, (S_, -2, 2.2), (S_, 12, 3.0)), (11.74, (S_, 1.5, 2.3), (S_, 12, 3.0))], 64, 3.0))
+    S.append((8.67, 10.6, [(8.67, (D_ + 17, 16, 2.4), (D_, 40, 2.4)), (10.57, (D_ + 17, 70, 2.6), (D_, 98, 2.6))], 64, 3.0))
+    S.append((10.6, 11.77, [(10.6, (S_, 3.2, 2.2), (S_, 10.6, 3.0)), (11.74, (S_, 5.6, 2.5), (S_, 10.6, 3.0))], 64, 3.0))
     S.append((11.77, 13.63, [(11.77, (BM_ + 0.2, -4.6, -0.4), (BM_, 0, 0.7)), (13.6, (BM_ + 0.6, -3.9, -0.2), (BM_ + 0.2, 0, 0.7))], 64, 3.0))
     S.append((13.63, 15.5, [(13.63, (T + 0.35, 1.3, 0.50), (T + 0.05, 3.4, 0.85)), (15.47, (T + 0.3, 1.9, 0.55), (T, 3.4, 0.9))], 3.5, 2.0))
     S.append((15.5, 17.3, [(15.5, (T + 0.3, -1.0, 0.70), (T, 5.2, 1.5)), (17.27, (T + 0.2, -0.4, 0.75), (T, 5.2, 1.55))], 64, 3.0))
@@ -154,7 +154,8 @@ def setup_render(sc, samples=64):
     sc.render.image_settings.file_format = "PNG"
     sc.view_settings.view_transform = "Standard"
     sc.view_settings.exposure = -0.3
-    sc.render.use_freestyle = True
+    sc.render.use_freestyle = False          # outlines are inverted-hull meshes now (rail_chars.add_outline): fast, no Freestyle
+    return
     vl = sc.view_layers[0]
     vl.use_freestyle = True
     fs = vl.freestyle_settings
@@ -209,6 +210,7 @@ def actor(name, costume, loc, yaw=0.0, sc_=1.0, windows=None, mode="stand", seat
         for t0, t1 in windows:
             keys += [(t0, on), (t1, FAR)]
         hop(root, keys)
+    expr(face, [(0.0, "Happy")])
     rc.idle(rig, 0.0, 66.0, amp=1.0) if mode == "stand" else rc.sit_dangling(rig, 0.0, 66.0)
     return root, rig, face
 
@@ -339,9 +341,9 @@ def build_all():
     A["wk_saw"] = actor("wkA", "worker1", (T + 0.8, 6.0, 0), -10, 1.0, W((0.0, 3.93)))
     A["engineer_plank"] = actor("engP", "engineer", (B_ + 9.0, 45.0, 0.51), 0, 1.0, W((7.83, 8.67)))
     A["tycoon_steps"] = actor("tycS", "tycoon", (S_, 10.6, 1.5), 0, 1.0, W((10.6, 11.77)))
-    A["beam1"] = actor("bm1", "worker4", (BM_ - 0.5, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.28 + 0.12)
-    A["beam2"] = actor("bm2", "worker1", (BM_ + 0.55, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.28 + 0.12)
-    A["beam3"] = actor("bm3", "worker2", (BM_ + 1.6, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.28 + 0.12)
+    A["beam1"] = actor("bm1", "worker4", (BM_ - 0.5, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.36)
+    A["beam2"] = actor("bm2", "worker1", (BM_ + 0.55, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.36)
+    A["beam3"] = actor("bm3", "worker2", (BM_ + 1.6, 0.0, 0), 0, 1.0, W((11.77, 13.63)), mode="sit", seat_z=0.36)
     A["boss1"] = actor("boss", "boss", (T + 0.05, 5.2, 0), 0, 1.0, W((13.63, 15.5)))
     A["boss2"] = actor("boss2", "boss", (T, 5.2, 0), 0, 1.0, W((15.5, 20.6)))
     A["eng_t"] = actor("engT", "engineer", (T + 0.9, 3.0, 0), 20, 1.0, W((17.3, 20.6)))
@@ -354,7 +356,7 @@ def build_all():
     A["crowd3"] = actor("cr3", "extra1", (S_ + 4.2, 2.6, 0), -20, 1.0, W((33.83, 36.23)))
     A["boss3"] = actor("boss3", "boss", (G_ + 0.1, 1.2, 0), 0, 1.0, W((44.5, 48.13)))
     A["wk_hot"] = actor("wkH", "worker3", (DK - 1.4, 7.5, 0), 0, 1.0, W((48.13, 51.37)))
-    A["sun"] = actor("sun", "tycoon_robe", (SUN_X, 48.0, 0), 0, 1.0, W((51.37, 54.53)), mode="sit", seat_z=0.28 + 0.12)
+    A["sun"] = actor("sun", "tycoon_robe", (SUN_X, 48.0, 0), 0, 1.0, W((51.37, 54.53)), mode="sit", seat_z=0.36)
     A["eng_l"] = actor("engL", "engineer", (L_ + 0.2, 5.5, 0), 0, 1.0, W((54.53, 59.6)))
     A["boss4"] = actor("boss4", "boss", (L_ - 0.8, 7.0, 0), 0, 1.0, W((54.53, 59.6)))
     # facial acting (t, expression)

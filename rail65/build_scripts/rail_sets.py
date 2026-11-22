@@ -3,6 +3,7 @@ Each set lives at its own X offset so hard cuts are free. Builders return a dict
 import bpy, bmesh, math, random
 from mathutils import Vector, Matrix
 import casino_scene as cs
+import rail_rocks as rr
 from casino_scene import mat, box, cyl, ball, panel, torus, link, coll, mesh_ob, finish
 
 F = lambda t: max(1, int(round(1 + t * cs.FPS)))
@@ -136,9 +137,12 @@ def mat_strata(name, freq, stops, distort=2.5, noise_scale=0.25, emit=0.3, rough
 def M():
     d = {}
     ROCK = [(0.0, (0.55, 0.14, 0.08)), (0.35, (0.85, 0.36, 0.12)), (0.65, (0.97, 0.60, 0.22)), (1.0, (0.70, 0.22, 0.12))]
-    d["rock"] = mat_strata("Rock", 9.0, ROCK, 3.0, 0.8, emit=0.28)
-    d["rock_big"] = mat_strata("RockBig", 3.2, ROCK, 3.5, 0.12, emit=0.32)
-    d["void"] = mat_strata("Void", 2.4, [(0.0, (0.03, 0.05, 0.38)), (0.5, (0.12, 0.22, 0.75)), (0.8, (0.30, 0.28, 0.80)), (1.0, (0.10, 0.12, 0.55))], 2.0, 0.05, emit=0.9, rough=1.0)
+    d["rock"] = mat_strata("Rock", 3.0, ROCK, 2.0, 0.6, emit=0.30)
+    d["rock_big"] = mat_strata("RockBig", 1.15, ROCK, 2.6, 0.10, emit=0.34)
+    d["rock_dark"] = mat_strata("RockDark", 1.4, [(0.0, (0.30, 0.07, 0.05)), (0.5, (0.55, 0.20, 0.09)), (1.0, (0.40, 0.12, 0.07))], 2.2, 0.12, emit=0.28)
+    d["cactus"] = mat("Cactus", (0.12, 0.45, 0.2), rough=0.8, emit=(0.12, 0.45, 0.2), estr=0.3)
+    d["bush"] = mat("Bush", (0.38, 0.45, 0.2), rough=1.0, emit=(0.38, 0.45, 0.2), estr=0.3)
+    d["void"] = mat_strata("Void", 0.28, [(0.0, (0.04, 0.06, 0.42)), (0.5, (0.14, 0.26, 0.78)), (0.85, (0.42, 0.36, 0.88)), (1.0, (0.12, 0.16, 0.62))], 3.0, 0.03, emit=0.9, rough=1.0)
     d["ballast"] = mat_box("Ballast", "ballast.png", 0.9, emit=0.1, rough=1.0, spec=0.05)
     d["sand"] = mat_box("Sand", "sand.png", 0.08, emit=0.3, rough=1.0, spec=0.0)
     d["wood"] = mat_box("Wood", "wood.png", 0.6, emit=0.12, rough=0.8, spec=0.2)
@@ -371,9 +375,9 @@ def build_track_set(m, ledge=False, ox=None):
     track("TK_Main", ox, L0, L1, 0.0, m, col)
     # second track on the left (green locomotive passes there)
     track("TK_Side", ox, L0, L1, 0.0, m, col, x=-3.9)
-    box("TK_WallL", 3, L1 - L0, 60, (ox - 7.6, ym, 29.5), m["rock_big"], 0, col)
+    rr.canyon_wall("TK_WallL", (ox - 6.1, L0, 0), (0, 1, 0), (1, 0, 0), L1 - L0, 55, m["rock_big"], m["rock_dark"], col, seed=11)
     if not ledge:
-        box("TK_WallR", 3, L1 - L0, 60, (ox + 7.6, ym, 29.5), m["rock_big"], 0, col)
+        rr.canyon_wall("TK_WallR", (ox + 6.1, L0, 0), (0, 1, 0), (-1, 0, 0), L1 - L0, 55, m["rock_big"], m["rock_dark"], col, seed=12)
     else:
         box("TK_LedgeFar", 3, L1 - L0, 80, (ox + 70, ym, -10), m["void"], 0, col)
         box("TK_VoidFloor", 140, L1 - L0, 1, (ox + 36, ym, -48), m["void"], 0, col)
@@ -385,6 +389,8 @@ def build_track_set(m, ledge=False, ox=None):
         x = ox + r.choice((-1, 1)) * r.uniform(3.4, 6.2) - (0 if not ledge else 0)
         y = r.uniform(0, 150)
         ball(f"TK_Rock{i}", r.uniform(0.15, 0.4), (x, y, 0.05), m["rock"], scale=(1, 1, 0.7), seg=10, rings=6, col=col)
+    rr.clutter("TK_Dec" + ("L" if ledge else ""), ox, 0, 150, [(2.4, 5.6)] if not ledge else [(2.4, 6.5)], m["cactus"], m["rock"], m["bush"], col, seed=21)
+    rr.clutter("TK_DecW" + ("L" if ledge else ""), ox, 0, 150, [(-5.7, -5.3)], m["cactus"], m["rock"], m["bush"], col, seed=22, n_cactus=3, n_bush=8, n_boulder=6)
     # blue sky behind the far end is the world; mesa silhouettes
     return {"ox": ox, "cx": ox}
 
@@ -510,7 +516,7 @@ def build_station_set(m):
 def build_beam_set(m):
     ox = OX["BEAM"]
     col = coll("Env_Beam")
-    panel("BM_Back", 160, 70, (ox, 18, 8), m["rock_big"], col, rot=(math.radians(90), 0, 0))
+    rr.canyon_wall("BM_Back", (ox - 90, 34, -30), (1, 0, 0), (0, -1, 0), 180, 90, m["rock_big"], m["rock_dark"], col, seed=31, depth=(4, 9), col_w=(4, 8), tier_h=(5, 10))
     panel("BM_Void", 160, 90, (ox, 17.8, -62), m["void"], col, rot=(math.radians(90), 0, 0))
     box("BM_Girder", 12.0, 0.6, 0.45, (ox, 0, 0.0), m["steel"], 0.02, col)
     box("BM_GirderTop", 12.0, 0.9, 0.08, (ox, 0, 0.27), m["steel"], 0, col)

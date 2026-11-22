@@ -1,8 +1,8 @@
 {
   "mode": "full",
   "samples": 0,
-  "fs_off": "120-235,262-318,620-822,1089-1335,1790-1956",
+  "fs_off": "",
   "frame_start": 1,
-  "frame_end": 1956,
+  "frame_end": 451,
   "skip_benchmark": false
 }

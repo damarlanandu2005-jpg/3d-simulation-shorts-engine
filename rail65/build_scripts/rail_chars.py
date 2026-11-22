@@ -8,10 +8,10 @@ from casino_scene import mat, link, coll, mesh_ob
 
 # ---- standing legs (the casino rig sits). Hips at z=0.02, feet at z=-0.62.
 for s, n in ((1, "L"), (-1, "R")):
-    ch.BONES[f"thigh.{n}"] = ((s * 0.09, 0, 0.03), (s * 0.09, 0.0, -0.30), "pelvis", False)
-    ch.BONES[f"shin.{n}"] = ((s * 0.09, 0.0, -0.30), (s * 0.09, 0.0, -0.58), f"thigh.{n}", True)
-    ch.BONES[f"foot.{n}"] = ((s * 0.09, 0.0, -0.58), (s * 0.09, -0.08, -0.62), f"shin.{n}", True)
-FOOT_DROP = 0.64            # root z = ground + FOOT_DROP
+    ch.BONES[f"thigh.{n}"] = ((s * 0.09, 0, 0.03), (s * 0.09, 0.0, -0.22), "pelvis", False)
+    ch.BONES[f"shin.{n}"] = ((s * 0.09, 0.0, -0.22), (s * 0.09, 0.0, -0.42), f"thigh.{n}", True)
+    ch.BONES[f"foot.{n}"] = ((s * 0.09, 0.0, -0.42), (s * 0.09, -0.08, -0.46), f"shin.{n}", True)
+FOOT_DROP = 0.48            # root z = ground + FOOT_DROP
 
 SKIN = (0.98, 0.95, 0.87)
 
@@ -42,6 +42,25 @@ def cyl_bm(r, h, z, y=0.0, seg=28, r2=None):
 
 def flat(c, e=0.45, rough=0.85, spec=0.05, name=None):
     return mat(name or f"RC_{c[0]:.2f}_{c[1]:.2f}_{c[2]:.2f}", c, rough=rough, emit=c, estr=e, spec=spec)
+
+
+SKIP_OUTLINE = ("eye", "brow", "mouth", "teeth", "lid", "pupil", "face", "collar", "kerch", "bow", "button", "glass", "chain", "band", "rig_")
+
+
+def add_outline(objs, thick=0.014):
+    """inverted-hull outline: a second material slot + Solidify (flipped normals, back-face culled) = cheap cartoon ink in Eevee, no Freestyle"""
+    om = mat("InkOutline", (0.035, 0.012, 0.010), rough=1.0, spec=0.0)
+    om.use_backface_culling = True
+    for o in objs:
+        if o.type != "MESH" or any(k in o.name.lower() for k in SKIP_OUTLINE):
+            continue
+        if not o.data.materials:
+            continue
+        o.data.materials.append(om)
+        md = o.modifiers.new("Ink", "SOLIDIFY")
+        md.thickness, md.offset, md.use_flip_normals = thick, 1.0, True
+        md.material_offset = len(o.data.materials) - 1
+        md.use_quality_normals = True
 
 
 def build_rail_char(name, costume, with_hat=True):
@@ -131,19 +150,20 @@ def build_rail_char(name, costume, with_hat=True):
     # limbs + hands + shoes
     for s, n in ((1, "L"), (-1, "R")):
         pts = [ch.BONES[f"upper_arm.{n}"][0], ch.BONES[f"forearm.{n}"][0], ch.BONES[f"hand.{n}"][0]]
-        ch.new_ob(f"{name}_Arm.{n}", ch.tube(pts, 0.019, 0.017, per=8), limb_m, col, ch.chain_weights(pts, [f"upper_arm.{n}", f"forearm.{n}", f"hand.{n}"], 0.045), rig)
+        ch.new_ob(f"{name}_Arm.{n}", ch.tube(pts, 0.034, 0.030, per=8), limb_m, col, ch.chain_weights(pts, [f"upper_arm.{n}", f"forearm.{n}", f"hand.{n}"], 0.045), rig)
         hpos = Vector(ch.BONES[f"hand.{n}"][0]) + Vector((0, -0.01, -0.02))
-        ch.new_ob(f"{name}_Hand.{n}", ch.ellipsoid(hpos, (0.034, 0.03, 0.04), 14, 8), skin_m, col, lambda co, n=n: {f"hand.{n}": 1.0}, rig)
+        ch.new_ob(f"{name}_Hand.{n}", ch.ellipsoid(hpos, (0.05, 0.045, 0.055), 14, 8), skin_m, col, lambda co, n=n: {f"hand.{n}": 1.0}, rig)
         lp = [ch.BONES[f"thigh.{n}"][0], ch.BONES[f"shin.{n}"][0], ch.BONES[f"foot.{n}"][0]]
-        ch.new_ob(f"{name}_Leg.{n}", ch.tube(lp, 0.026, 0.022, per=8), limb_m, col, ch.chain_weights(lp, [f"thigh.{n}", f"shin.{n}", f"foot.{n}"], 0.05), rig)
+        ch.new_ob(f"{name}_Leg.{n}", ch.tube(lp, 0.052, 0.046, per=8), limb_m, col, ch.chain_weights(lp, [f"thigh.{n}", f"shin.{n}", f"foot.{n}"], 0.05), rig)
         fp = Vector(ch.BONES[f"foot.{n}"][0]) + Vector((0, -0.05, -0.02))
-        ch.new_ob(f"{name}_Shoe.{n}", ch.ellipsoid(fp, (0.05, 0.09, 0.04), 14, 8), flat((0.05, 0.04, 0.04), 0.2, name="Shoe"), col, lambda co, n=n: {f"foot.{n}": 1.0}, rig)
+        ch.new_ob(f"{name}_Shoe.{n}", ch.ellipsoid(fp, (0.07, 0.115, 0.05), 14, 8), flat((0.05, 0.04, 0.04), 0.2, name="Shoe"), col, lambda co, n=n: {f"foot.{n}": 1.0}, rig)
     if cfg.get("cane"):
         hp = Vector(ch.BONES["hand.R"][0]) + Vector((0, -0.04, 0.02))
         cp = [hp + Vector((0.0, 0.0, 0.10)), hp + Vector((0, 0.0, -0.20)), hp + Vector((0, 0.0, -0.60)), hp + Vector((0, 0.0, -0.80))]
         ch.new_ob(f"{name}_Cane", ch.tube(cp, 0.014, 0.014, per=2, ring=6), flat((0.30, 0.18, 0.08), 0.3, name="Cane"), col, lambda co: {"hand.R": 1.0}, rig)
         ch.new_ob(f"{name}_CaneKnob", ch.ellipsoid(hp + Vector((0, 0, 0.12)), (0.035, 0.035, 0.035), 10, 6), gold, col, lambda co: {"hand.R": 1.0}, rig)
     objs = list(set(bpy.data.objects) - before)
+    add_outline(objs)
     root = bpy.data.objects.new(f"Root_{name}", None)
     link(root, col)
     for o in objs:

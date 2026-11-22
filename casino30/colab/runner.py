@@ -17,7 +17,7 @@ commit = subprocess.run(["git", "-C", str(REPO_DIR), "rev-parse", "--short", "HE
 print("kit commit:", commit)
 
 G = {"__name__": "__main__"}
-status = {"commit": commit, "config": cfg, "started": datetime.datetime.utcnow().isoformat() + "Z", "steps": [], "status": "running"}
+status = {"commit": commit, "config": cfg, "started": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + "Z", "steps": [], "status": "running"}
 
 def run_cell(n):
     src = (CELLS / ("%02d.py" % n)).read_text()
@@ -60,7 +60,7 @@ def push_results():
         g("clone", "--depth", "1", "-b", RESULTS_BRANCH, url, str(d))
     else:
         d.mkdir(); g("init", "-q", cwd=d); g("checkout", "-q", "--orphan", RESULTS_BRANCH, cwd=d); g("remote", "add", "origin", url, cwd=d)
-    run_id = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + commit
+    run_id = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).strftime("%Y%m%d-%H%M%S") + "-" + commit
     shutil.copytree(bundle, d / "runs" / run_id)
     (d / "LATEST.txt").write_text(run_id + "\n")
     g("-c", "user.name=colab-runner", "-c", "user.email=colab-runner@users.noreply.github.com", "add", "-A", cwd=d)
@@ -86,8 +86,9 @@ except BaseException as e:
     status["error"] = repr(e)
     status["traceback"] = traceback.format_exc()[-3000:]
     print("RUN FAILED:", repr(e))
+    print(status["traceback"])
 finally:
-    status["finished"] = datetime.datetime.utcnow().isoformat() + "Z"
+    status["finished"] = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + "Z"
     push_results()
     if status["status"] != "passed":
         raise SystemExit("casino30 run failed: " + status.get("error", ""))
